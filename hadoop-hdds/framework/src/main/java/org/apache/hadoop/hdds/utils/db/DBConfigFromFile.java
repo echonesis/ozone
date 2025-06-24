@@ -24,6 +24,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hdds.utils.db.managed.ManagedDBOptions;
+import org.eclipse.jetty.util.StringUtil;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.Env;
 import org.rocksdb.OptionsUtil;
@@ -118,7 +119,7 @@ public final class DBConfigFromFile {
     ManagedDBOptions options = null;
     File configLocation = getConfigLocation();
     if (configLocation != null &&
-        StringUtils.isNotBlank(configLocation.toString())) {
+        StringUtil.isNotBlank(configLocation.toString())) {
       Path optionsFile = Paths.get(configLocation.toString(),
           getOptionsFileNameFromDB(dbFileName));
 
