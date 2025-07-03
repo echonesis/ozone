@@ -1,3 +1,5 @@
+[![Apache Ozone Logo](https://www.apache.org/logos/res/ozone/default.png)](https://ozone.apache.org)
+
 Apache Ozone
 ===
 
