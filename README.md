@@ -1,4 +1,8 @@
-[![Apache Ozone Logo](https://www.apache.org/logos/res/ozone/default.png)](https://ozone.apache.org)
+<div align="center">
+  <a href="https://ozone.apache.org">
+    <img src="https://www.apache.org/logos/res/ozone/default.png" alt="Apache Ozone Logo" />
+  </a>
+</div>
 
 Apache Ozone
 ===
