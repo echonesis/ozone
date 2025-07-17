@@ -130,11 +130,14 @@ public class CsiServer extends GenericCli implements Callable<Void> {
     private String volumeOwner;
 
     @Config(key = "mount.command",
-        defaultValue = "goofys --endpoint %s %s %s",
+        defaultValue = "mount-s3 --force-path-style %s %s --endpoint-url %s",
+        // Ozone configures path style addresses by default, so --force-path-style.
+        // If virtual host style is configured (ozone.s3g.domain.name=<domain name>),
+        // drop --force-path-style. We probably want to make this configurable.
         description =
             "This is the mount command which is used to publish volume."
-                + " these %s will be replicated by s3gAddress, volumeId "
-                + " and target path.",
+              + " these %s will be replicated by volumeId, target path "
+              + " and s3gAddress.",
         tags = ConfigTag.STORAGE)
     private String mountCommand;
 
