@@ -33,6 +33,8 @@
     <file.encoding>UTF-8</file.encoding>
     <!-- no tests in this module so far -->
     <maven.test.skip>true</maven.test.skip>
+    <!-- rpm usage-->
+    <rpm.targetArch>noarch</rpm.targetArch>
   </properties>
 
   <dependencies>
@@ -453,11 +455,16 @@
               <license>Apache License, Version 2.0</license>
               <summary>Ozone RPM package</summary>
               <group>Development/Tools</group>
-              <needarch>noarch</needarch>
-              <targetArch>noarch</targetArch>
+              <targetArch>${rpm.targetArch}</targetArch>
               <targetOS>linux</targetOS>
+              <preinstallScriptlet>
+                <scriptFile>${basedir}/src/main/package/rpm/preinstall.sh</scriptFile>
+              </preinstallScriptlet>
+              <postinstallScriptlet>
+                <scriptFile>${basedir}/src/main/package/rpm/postinstall.sh</scriptFile>
+              </postinstallScriptlet>
               <requires>
-                <require>java-1.8.0-openjdk &gt;= 1.8.0</require>
+                <require>ncurses</require>
               </requires>
 
               <defaultDirmode>500</defaultDirmode>
