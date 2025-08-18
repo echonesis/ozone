@@ -447,7 +447,7 @@
           <plugin>
             <groupId>org.codehaus.mojo</groupId>
             <artifactId>rpm-maven-plugin</artifactId>
-            <version>2.2.0</version>
+            <version>2.3.0</version>
             <configuration>
               <name>ozone</name>
               <version>${project.version}</version>
@@ -457,9 +457,6 @@
               <group>Development/Tools</group>
               <targetArch>${rpm.targetArch}</targetArch>
               <targetOS>linux</targetOS>
-              <preinstallScriptlet>
-                <scriptFile>${basedir}/src/main/package/rpm/preinstall.sh</scriptFile>
-              </preinstallScriptlet>
               <postinstallScriptlet>
                 <scriptFile>${basedir}/src/main/package/rpm/postinstall.sh</scriptFile>
               </postinstallScriptlet>
