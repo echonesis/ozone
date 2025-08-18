@@ -454,7 +454,7 @@
               <release>1</release>
               <license>Apache License, Version 2.0</license>
               <summary>Ozone RPM package</summary>
-              <group>Development/Tools</group>
+              <group>Applications/Engineering</group>
               <targetArch>${rpm.targetArch}</targetArch>
               <targetOS>linux</targetOS>
               <postinstallScriptlet>
