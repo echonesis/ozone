@@ -64,6 +64,16 @@ public abstract class WithObjectID extends WithMetadata {
     return updateID;
   }
 
+  public final void assertMonotonicUpdateID(long newValue) {
+    final long currentValue = getUpdateID();
+    if (newValue < currentValue) {
+      throw new IllegalArgumentException(String.format(
+          "Trying to set updateID to %d which is not greater than the " +
+              "current value of %d for %s",
+          newValue, currentValue, getObjectInfo()));
+    }
+  }
+
   /** Hook method, customized in subclasses. */
   public String getObjectInfo() {
     return this.toString();
