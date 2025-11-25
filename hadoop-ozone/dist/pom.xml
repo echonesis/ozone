@@ -38,7 +38,7 @@
     <!-- no tests in this module so far -->
     <maven.test.skip>true</maven.test.skip>
     <!-- rpm usage-->
-    <rpm.targetArch>noarch</rpm.targetArch>
+    <!-- <rpm.targetArch>noarch</rpm.targetArch> -->
   </properties>
 
   <dependencies>
@@ -609,12 +609,14 @@
               <license>Apache License, Version 2.0</license>
               <summary>Ozone RPM package</summary>
               <group>Applications/Engineering</group>
-              <targetArch>${rpm.targetArch}</targetArch>
+              <!-- <targetArch>${rpm.targetArch}</targetArch> -->
               <targetOS>linux</targetOS>
-              <postinstallScriptlet>
+              <needarch>true</needarch>
+              <!-- <postinstallScriptlet>
                 <scriptFile>${basedir}/src/main/package/rpm/postinstall.sh</scriptFile>
-              </postinstallScriptlet>
+              </postinstallScriptlet> -->
               <requires>
+                <require>java-headless</require>
                 <require>ncurses</require>
               </requires>
 
