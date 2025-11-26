@@ -18,12 +18,11 @@
 package org.apache.hadoop.ozone.om.helpers;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
 import org.apache.hadoop.hdds.utils.db.Codec;
 import org.apache.hadoop.hdds.utils.db.CopyObject;
 import org.apache.hadoop.hdds.utils.db.DelegatedCodec;
@@ -44,12 +43,13 @@ public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPre
       OmPrefixInfo.class);
 
   private final String name;
-  private final CopyOnWriteArrayList<OzoneAcl> acls;
+  private final List<OzoneAcl> acls;
 
   private OmPrefixInfo(Builder b) {
     super(b);
     name = b.name;
-    acls = new CopyOnWriteArrayList<>(b.acls);
+    acls = b.acls == null ? ImmutableList.of()
+        : ImmutableList.copyOf(b.acls);
   }
 
   public static Codec<OmPrefixInfo> getCodec() {
@@ -62,18 +62,6 @@ public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPre
    */
   public List<OzoneAcl> getAcls() {
     return acls;
-  }
-
-  public boolean addAcl(OzoneAcl acl) {
-    return OzoneAclUtil.addAcl(acls, acl);
-  }
-
-  public boolean removeAcl(OzoneAcl acl) {
-    return OzoneAclUtil.removeAcl(acls, acl);
-  }
-
-  public boolean setAcls(List<OzoneAcl> newAcls) {
-    return OzoneAclUtil.setAcl(acls, newAcls);
   }
 
   /**
@@ -102,7 +90,7 @@ public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPre
 
     public Builder() {
       //Default values
-      this.acls = new LinkedList<>();
+      this.acls = new ArrayList<>();
     }
 
     public Builder(OmPrefixInfo obj) {
@@ -112,6 +100,12 @@ public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPre
     }
 
     public Builder setAcls(List<OzoneAcl> listOfAcls) {
+      acls.clear();
+      addAcls(listOfAcls);
+      return this;
+    }
+
+    public Builder addAcls(List<OzoneAcl> listOfAcls) {
       if (listOfAcls != null) {
         acls.addAll(listOfAcls);
       }
@@ -251,4 +245,3 @@ public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPre
     return new Builder(this);
   }
 }
-
