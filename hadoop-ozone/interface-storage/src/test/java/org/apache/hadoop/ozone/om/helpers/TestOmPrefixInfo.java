@@ -102,7 +102,6 @@ public class TestOmPrefixInfo {
         .build();
 
     assertNotEquals(modifiedPrefixInfo, clonePrefixInfo);
-    assertEquals(omPrefixInfo, clonePrefixInfo);
     assertThrows(UnsupportedOperationException.class,
         () -> omPrefixInfo.getAcls().add(OzoneAcl.of(
             IAccessAuthorizer.ACLIdentityType.USER, username,

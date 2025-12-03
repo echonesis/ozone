@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import net.jcip.annotations.Immutable;
 import org.apache.hadoop.hdds.utils.db.Codec;
 import org.apache.hadoop.hdds.utils.db.CopyObject;
 import org.apache.hadoop.hdds.utils.db.DelegatedCodec;
@@ -35,6 +36,7 @@ import org.apache.hadoop.ozone.storage.proto.OzoneManagerStorageProtos.Persisted
  * can be extended for other OzFS optimizations in future.
  */
 // TODO: support Auditable interface
+@Immutable
 public final class OmPrefixInfo extends WithObjectID implements CopyObject<OmPrefixInfo> {
   private static final Codec<OmPrefixInfo> CODEC = new DelegatedCodec<>(
       Proto2Codec.get(PersistedPrefixInfo.getDefaultInstance()),
