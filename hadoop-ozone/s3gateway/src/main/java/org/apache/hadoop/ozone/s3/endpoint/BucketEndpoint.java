@@ -107,6 +107,14 @@ public class BucketEndpoint extends EndpointBase {
     S3GAction s3GAction = S3GAction.GET_BUCKET;
     PerformanceStringBuilder perf = new PerformanceStringBuilder();
 
+    // Chain of responsibility: let each handler try to handle the request
+    for (BucketOperationHandler handler : handlers) {
+      Response response = handler.handleGetRequest(bucketName);
+      if (response != null) {
+        return response;  // Handler handled the request
+      }
+    }
+
     final String continueToken = queryParams().get(QueryParams.CONTINUATION_TOKEN);
     final String delimiter = queryParams().get(QueryParams.DELIMITER);
     final String encodingType = queryParams().get(QueryParams.ENCODING_TYPE);
@@ -122,15 +130,6 @@ public class BucketEndpoint extends EndpointBase {
     OzoneBucket bucket = null;
 
     try {
-      final String aclMarker = queryParams().get(QueryParams.ACL);
-      if (aclMarker != null) {
-        s3GAction = S3GAction.GET_ACL;
-        S3BucketAcl result = getAcl(bucketName);
-        getMetrics().updateGetAclSuccessStats(startNanos);
-        auditReadSuccess(s3GAction);
-        return Response.ok(result, MediaType.APPLICATION_XML_TYPE).build();
-      }
-
       final String uploads = queryParams().get(QueryParams.UPLOADS);
       if (uploads != null) {
         s3GAction = S3GAction.LIST_MULTIPART_UPLOAD;
@@ -532,51 +531,6 @@ public class BucketEndpoint extends EndpointBase {
     }
 
     return result;
-  }
-
-  /**
-   * Implement acl get.
-   * <p>
-   * see: https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketAcl.html
-   */
-  public S3BucketAcl getAcl(String bucketName)
-      throws OS3Exception, IOException {
-    long startNanos = Time.monotonicNowNanos();
-    S3BucketAcl result = new S3BucketAcl();
-    try {
-      OzoneBucket bucket = getBucket(bucketName);
-      S3Owner.verifyBucketOwnerCondition(getHeaders(), bucketName, bucket.getOwner());
-      S3Owner owner = S3Owner.of(bucket.getOwner());
-      result.setOwner(owner);
-
-      // TODO: remove this duplication avoid logic when ACCESS and DEFAULT scope
-      // TODO: are merged.
-      // Use set to remove ACLs with different scopes(ACCESS and DEFAULT)
-      Set<Grant> grantSet = new HashSet<>();
-      // Return ACL list
-      for (OzoneAcl acl : bucket.getAcls()) {
-        List<Grant> grants = S3Acl.ozoneNativeAclToS3Acl(acl);
-        grantSet.addAll(grants);
-      }
-      ArrayList<Grant> grantList = new ArrayList<>();
-      grantList.addAll(grantSet);
-      result.setAclList(
-          new S3BucketAcl.AccessControlList(grantList));
-      return result;
-    } catch (OMException ex) {
-      getMetrics().updateGetAclFailureStats(startNanos);
-      auditReadFailure(S3GAction.GET_ACL, ex);
-      if (ex.getResult() == ResultCodes.BUCKET_NOT_FOUND) {
-        throw newError(S3ErrorTable.NO_SUCH_BUCKET, bucketName, ex);
-      } else if (isAccessDenied(ex)) {
-        throw newError(S3ErrorTable.ACCESS_DENIED, bucketName, ex);
-      } else {
-        throw newError(S3ErrorTable.INTERNAL_ERROR, bucketName, ex);
-      }
-    } catch (OS3Exception ex) {
-      getMetrics().updateGetAclFailureStats(startNanos);
-      throw ex;
-    }
   }
 
   private void addKey(ListObjectResponse response, OzoneKey next) {
