@@ -123,6 +123,7 @@ public class BucketAclHandler extends EndpointBase implements BucketOperationHan
       }
     } catch (OS3Exception ex) {
       getMetrics().updateGetAclFailureStats(startNanos);
+      auditReadFailure(s3GAction, ex);
       throw ex;
     }
   }
