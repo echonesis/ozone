@@ -170,6 +170,38 @@ public class TestAdminFilter {
     testAdminFilterWithPrincipal(new OzoneConfiguration(), "reject", false);
   }
 
+  @Test
+  public void testAdminFilterStarterUserAutoAdmin() throws Exception {
+    // Test that the user who starts Recon automatically becomes an admin
+    OzoneConfiguration conf = new OzoneConfiguration();
+    // Don't set any admins in config
+    String currentUser = UserGroupInformation.getCurrentUser().getShortUserName();
+
+    // The current user (who "started" Recon) should be allowed
+    testAdminFilterWithPrincipal(conf, currentUser, true);
+
+    // But other users should be rejected
+    testAdminFilterWithPrincipal(conf, "otheruser", false);
+  }
+
+  @Test
+  public void testAdminFilterStarterUserPlusConfiguredAdmins() throws Exception {
+    // Test that both starter user and configured admins are allowed
+    OzoneConfiguration conf = new OzoneConfiguration();
+    conf.setStrings(OzoneConfigKeys.OZONE_ADMINISTRATORS, "configadmin");
+
+    String currentUser = UserGroupInformation.getCurrentUser().getShortUserName();
+
+    // The current user (starter) should be allowed
+    testAdminFilterWithPrincipal(conf, currentUser, true);
+
+    // Configured admin should also be allowed
+    testAdminFilterWithPrincipal(conf, "configadmin", true);
+
+    // But other users should be rejected
+    testAdminFilterWithPrincipal(conf, "reject", false);
+  }
+
   private void testAdminFilterWithPrincipal(OzoneConfiguration conf,
       String principalToUse, boolean shouldPass) throws Exception {
     Principal mockPrincipal = mock(Principal.class);
@@ -180,8 +212,10 @@ public class TestAdminFilter {
     HttpServletResponse mockResponse = mock(HttpServletResponse.class);
     FilterChain mockFilterChain = mock(FilterChain.class);
 
-    new ReconAdminFilter(conf).doFilter(mockRequest, mockResponse,
-        mockFilterChain);
+    ReconAdminFilter filter = new ReconAdminFilter(conf);
+    // Initialize the filter to set up the reconAdmins with starter user
+    filter.init(null);
+    filter.doFilter(mockRequest, mockResponse, mockFilterChain);
 
     if (shouldPass) {
       verify(mockFilterChain).doFilter(mockRequest, mockResponse);

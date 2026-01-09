@@ -33,7 +33,6 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.recon.ReconConfigKeys;
 import org.apache.hadoop.hdds.server.OzoneAdmins;
-import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +48,7 @@ public class ReconAdminFilter implements Filter {
       LoggerFactory.getLogger(ReconAdminFilter.class);
 
   private final OzoneConfiguration conf;
+  private OzoneAdmins reconAdmins;
 
   @Inject
   ReconAdminFilter(OzoneConfiguration conf) {
@@ -56,7 +56,32 @@ public class ReconAdminFilter implements Filter {
   }
 
   @Override
-  public void init(FilterConfig filterConfig) throws ServletException { }
+  public void init(FilterConfig filterConfig) throws ServletException {
+    try {
+      String reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
+
+      // Get Ozone admins (includes starter user automatically)
+      Collection<String> adminUsers =
+          OzoneAdmins.getOzoneAdminsFromConfig(conf, reconStarterUser);
+      // Add Recon-specific admins
+      adminUsers.addAll(
+          conf.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS));
+
+      // Get admin groups
+      Collection<String> adminGroups =
+          OzoneAdmins.getOzoneAdminsGroupsFromConfig(conf);
+      // Add Recon-specific admin groups
+      adminGroups.addAll(
+          conf.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS_GROUPS));
+
+      reconAdmins = new OzoneAdmins(adminUsers, adminGroups);
+      LOG.info("ReconAdminFilter initialized with adminUsers: {}",
+          reconAdmins.getAdminUsernames());
+    } catch (IOException e) {
+      LOG.error("Failed to initialize ReconAdminFilter", e);
+      throw new ServletException("Failed to initialize ReconAdminFilter", e);
+    }
+  }
 
   @Override
   public void doFilter(ServletRequest servletRequest,
@@ -100,15 +125,10 @@ public class ReconAdminFilter implements Filter {
   public void destroy() { }
 
   private boolean hasPermission(UserGroupInformation user) {
-    Collection<String> admins =
-        conf.getStringCollection(OzoneConfigKeys.OZONE_ADMINISTRATORS);
-    admins.addAll(
-        conf.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS));
-    Collection<String> adminGroups =
-        conf.getStringCollection(OzoneConfigKeys.OZONE_ADMINISTRATORS_GROUPS);
-    adminGroups.addAll(
-        conf.getStringCollection(
-            ReconConfigKeys.OZONE_RECON_ADMINISTRATORS_GROUPS));
-    return new OzoneAdmins(admins, adminGroups).isAdmin(user);
+    if (reconAdmins == null) {
+      LOG.warn("ReconAdmins not initialized, denying access");
+      return false;
+    }
+    return reconAdmins.isAdmin(user);
   }
 }

@@ -41,6 +41,7 @@ import org.apache.hadoop.hdds.recon.ReconConfig;
 import org.apache.hadoop.hdds.scm.server.OzoneStorageContainerManager;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClient;
+import org.apache.hadoop.hdds.server.OzoneAdmins;
 import org.apache.hadoop.hdds.utils.HddsServerUtil;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.recon.api.types.FeatureProvider;
@@ -85,6 +86,8 @@ public class ReconServer extends GenericCli implements Callable<Void> {
   private ReconStorageConfig reconStorage;
   private CertificateClient certClient;
   private ReconTaskStatusMetrics reconTaskStatusMetrics;
+  private String reconStarterUser;
+  private OzoneAdmins reconAdmins;
 
   private volatile boolean isStarted = false;
 
@@ -103,6 +106,10 @@ public class ReconServer extends GenericCli implements Callable<Void> {
     HddsServerUtil.startupShutdownMessage(OzoneVersionInfo.OZONE_VERSION_INFO,
             ReconServer.class, originalArgs, LOG, configuration);
     ConfigurationProvider.setConfiguration(configuration);
+
+    reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
+    reconAdmins = OzoneAdmins.getOzoneAdmins(reconStarterUser, configuration);
+    LOG.info("Recon start with adminUsers: {}", reconAdmins.getAdminUsernames());
 
     LOG.info("Initializing Recon server...");
     try {
@@ -426,5 +433,9 @@ public class ReconServer extends GenericCli implements Callable<Void> {
   @VisibleForTesting
   ReconHttpServer getHttpServer() {
     return httpServer;
+  }
+
+  public OzoneAdmins getReconAdmins() {
+    return reconAdmins;
   }
 }
