@@ -86,7 +86,6 @@ public class ReconServer extends GenericCli implements Callable<Void> {
   private ReconStorageConfig reconStorage;
   private CertificateClient certClient;
   private ReconTaskStatusMetrics reconTaskStatusMetrics;
-  private String reconStarterUser;
   private OzoneAdmins reconAdmins;
 
   private volatile boolean isStarted = false;
@@ -107,7 +106,7 @@ public class ReconServer extends GenericCli implements Callable<Void> {
             ReconServer.class, originalArgs, LOG, configuration);
     ConfigurationProvider.setConfiguration(configuration);
 
-    reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
+    String reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
     reconAdmins = OzoneAdmins.getOzoneAdmins(reconStarterUser, configuration);
     LOG.info("Recon start with adminUsers: {}", reconAdmins.getAdminUsernames());
 
