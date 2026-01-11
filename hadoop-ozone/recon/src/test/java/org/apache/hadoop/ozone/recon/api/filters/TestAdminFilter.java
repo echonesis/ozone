@@ -20,12 +20,15 @@ package org.apache.hadoop.ozone.recon.api.filters;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.google.common.collect.Sets;
+import java.io.IOException;
 import java.security.Principal;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 import javax.servlet.FilterChain;
@@ -34,7 +37,9 @@ import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.Path;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.recon.ReconConfigKeys;
+import org.apache.hadoop.hdds.server.OzoneAdmins;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
+import org.apache.hadoop.ozone.recon.ReconServer;
 import org.apache.hadoop.ozone.recon.api.AdminOnly;
 import org.apache.hadoop.ozone.recon.api.ClusterStateEndpoint;
 import org.apache.hadoop.ozone.recon.api.MetricsProxyEndpoint;
@@ -204,6 +209,9 @@ public class TestAdminFilter {
 
   private void testAdminFilterWithPrincipal(OzoneConfiguration conf,
       String principalToUse, boolean shouldPass) throws Exception {
+    // Create mock ReconServer with admin logic
+    ReconServer mockReconServer = createMockReconServer(conf);
+
     Principal mockPrincipal = mock(Principal.class);
     when(mockPrincipal.getName()).thenReturn(principalToUse);
     HttpServletRequest mockRequest = mock(HttpServletRequest.class);
@@ -212,8 +220,7 @@ public class TestAdminFilter {
     HttpServletResponse mockResponse = mock(HttpServletResponse.class);
     FilterChain mockFilterChain = mock(FilterChain.class);
 
-    ReconAdminFilter filter = new ReconAdminFilter(conf);
-    // Initialize the filter to set up the reconAdmins with starter user
+    ReconAdminFilter filter = new ReconAdminFilter(mockReconServer);
     filter.init(null);
     filter.doFilter(mockRequest, mockResponse, mockFilterChain);
 
@@ -222,5 +229,39 @@ public class TestAdminFilter {
     } else {
       verify(mockResponse).setStatus(HttpServletResponse.SC_FORBIDDEN);
     }
+  }
+
+  /**
+   * Creates a mock ReconServer that mimics the actual admin initialization logic.
+   */
+  private ReconServer createMockReconServer(OzoneConfiguration conf) throws IOException {
+    // Get starter user (simulating ReconServer initialization)
+    String reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
+
+    // Get Ozone admins (includes starter user automatically)
+    Collection<String> adminUsers =
+        OzoneAdmins.getOzoneAdminsFromConfig(conf, reconStarterUser);
+    // Add Recon-specific admins
+    adminUsers.addAll(
+        conf.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS));
+
+    // Get admin groups
+    Collection<String> adminGroups =
+        OzoneAdmins.getOzoneAdminsGroupsFromConfig(conf);
+    // Add Recon-specific admin groups
+    adminGroups.addAll(
+        conf.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS_GROUPS));
+
+    OzoneAdmins reconAdmins = new OzoneAdmins(adminUsers, adminGroups);
+
+    // Create mock and configure its behavior
+    ReconServer mockReconServer = mock(ReconServer.class);
+    when(mockReconServer.isAdmin(any(UserGroupInformation.class)))
+        .thenAnswer(invocation -> {
+          UserGroupInformation user = invocation.getArgument(0);
+          return reconAdmins.isAdmin(user);
+        });
+
+    return mockReconServer;
   }
 }

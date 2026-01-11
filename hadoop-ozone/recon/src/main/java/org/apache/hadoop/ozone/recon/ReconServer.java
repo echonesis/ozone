@@ -31,6 +31,7 @@ import com.google.inject.Guice;
 import com.google.inject.Injector;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.Collection;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
@@ -38,6 +39,7 @@ import org.apache.hadoop.hdds.cli.GenericCli;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocolPB.SCMSecurityProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdds.recon.ReconConfig;
+import org.apache.hadoop.hdds.recon.ReconConfigKeys;
 import org.apache.hadoop.hdds.scm.server.OzoneStorageContainerManager;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClient;
@@ -106,8 +108,24 @@ public class ReconServer extends GenericCli implements Callable<Void> {
             ReconServer.class, originalArgs, LOG, configuration);
     ConfigurationProvider.setConfiguration(configuration);
 
+    // Initialize Recon admins (includes starter user + Recon-specific admins)
     String reconStarterUser = UserGroupInformation.getCurrentUser().getShortUserName();
-    reconAdmins = OzoneAdmins.getOzoneAdmins(reconStarterUser, configuration);
+
+    // Get Ozone admins (includes starter user automatically)
+    Collection<String> adminUsers =
+        OzoneAdmins.getOzoneAdminsFromConfig(configuration, reconStarterUser);
+    // Add Recon-specific admins
+    adminUsers.addAll(
+        configuration.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS));
+
+    // Get admin groups
+    Collection<String> adminGroups =
+        OzoneAdmins.getOzoneAdminsGroupsFromConfig(configuration);
+    // Add Recon-specific admin groups
+    adminGroups.addAll(
+        configuration.getStringCollection(ReconConfigKeys.OZONE_RECON_ADMINISTRATORS_GROUPS));
+
+    reconAdmins = new OzoneAdmins(adminUsers, adminGroups);
     LOG.info("Recon start with adminUsers: {}", reconAdmins.getAdminUsernames());
 
     LOG.info("Initializing Recon server...");
@@ -434,7 +452,31 @@ public class ReconServer extends GenericCli implements Callable<Void> {
     return httpServer;
   }
 
-  public OzoneAdmins getReconAdmins() {
-    return reconAdmins;
+  /**
+   * Get the collection of Recon admin usernames.
+   *
+   * @return Collection of admin usernames
+   */
+  public Collection<String> getReconAdminUsernames() {
+    return reconAdmins.getAdminUsernames();
+  }
+
+  /**
+   * Get the collection of Recon admin groups.
+   *
+   * @return Collection of admin groups
+   */
+  public Collection<String> getReconAdminGroups() {
+    return reconAdmins.getAdminGroups();
+  }
+
+  /**
+   * Check if a user is a Recon administrator.
+   *
+   * @param user UserGroupInformation
+   * @return true if the user is an admin, false otherwise
+   */
+  public boolean isAdmin(UserGroupInformation user) {
+    return reconAdmins.isAdmin(user);
   }
 }
