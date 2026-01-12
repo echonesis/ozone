@@ -130,7 +130,7 @@ public class ReconServer extends GenericCli implements Callable<Void> {
 
     LOG.info("Initializing Recon server...");
     try {
-      injector = Guice.createInjector(new ReconControllerModule(),
+      injector = Guice.createInjector(new ReconControllerModule(this),
           new ReconRestServletModule(configuration),
           new ReconSchemaGenerationModule());
 
