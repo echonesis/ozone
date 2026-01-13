@@ -338,7 +338,15 @@ public class RDBStore implements DBStore {
 
   public DBCheckpoint getSnapshot(String name) throws RocksDatabaseException {
     this.flushLog(true);
-    return checkPointManager.createCheckpoint(snapshotsParentDir, name);
+    DBCheckpoint checkpoint = checkPointManager.createCheckpoint(snapshotsParentDir, name);
+
+    // HDDS-13874: Notify RocksDBCheckpointDiffer to save FlushList for this snapshot
+    if (rocksDBCheckpointDiffer != null) {
+      long currentSeqNum = db.getLatestSequenceNumber();
+      rocksDBCheckpointDiffer.onSnapshotCreated(name, currentSeqNum);
+    }
+
+    return checkpoint;
   }
 
   @Override
