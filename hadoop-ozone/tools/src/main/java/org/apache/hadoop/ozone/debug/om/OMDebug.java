@@ -28,7 +28,7 @@ import picocli.CommandLine;
     name = "om",
     description = "Debug commands related to OM.",
     subcommands = {
-        CompactionLogDagPrinter.class,
+        FlushListPrinter.class,
         PrefixParser.class,
         ContainerToKeyMapping.class
     }

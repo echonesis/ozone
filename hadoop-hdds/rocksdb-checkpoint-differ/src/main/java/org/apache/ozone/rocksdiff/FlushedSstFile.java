@@ -17,10 +17,9 @@
 
 package org.apache.ozone.rocksdiff;
 
+import java.util.Objects;
 import org.apache.ozone.rocksdb.util.SstFileInfo;
 import org.rocksdb.LiveFileMetaData;
-
-import java.util.Objects;
 
 /**
  * Represents a flushed SST file tracked between snapshots.

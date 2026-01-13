@@ -52,7 +52,6 @@ import static org.mockito.Mockito.when;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.graph.MutableGraph;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -64,7 +63,6 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -74,7 +72,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -113,7 +110,6 @@ import org.apache.ozone.compaction.log.CompactionFileInfo;
 import org.apache.ozone.compaction.log.CompactionLogEntry;
 import org.apache.ozone.rocksdb.util.SstFileInfo;
 import org.apache.ozone.rocksdiff.RocksDBCheckpointDiffer.DifferSnapshotVersion;
-import org.apache.ozone.rocksdiff.RocksDBCheckpointDiffer.NodeComparator;
 import org.apache.ozone.test.GenericTestUtils;
 import org.apache.ratis.util.UncheckedAutoCloseable;
 import org.junit.jupiter.api.AfterEach;
@@ -976,11 +972,6 @@ public class TestRocksDBCheckpointDiffer {
       printAllSnapshots();
     }
 
-    // TODO: HDDS-13874 - Comment out DAG traversal, will use LinkedList
-    // traverseGraph(rocksDBCheckpointDiffer.getCompactionNodeMap(),
-    //     rocksDBCheckpointDiffer.getBackwardCompactionDAG(),
-    //     rocksDBCheckpointDiffer.getForwardCompactionDAG());
-
     diffAllSnapshots(rocksDBCheckpointDiffer);
 
     // Confirm correct links created
@@ -991,15 +982,11 @@ public class TestRocksDBCheckpointDiffer {
               "000017.sst", "000019.sst", "000021.sst", "000023.sst",
           "000024.sst", "000026.sst", "000029.sst"));
     }
-    // TODO: HDDS-13874 - Comment out DAG node validation, will validate L0 files
-    // rocksDBCheckpointDiffer.getForwardCompactionDAG().nodes().stream().forEach(compactionNode -> {
-    //   Assertions.assertNotNull(compactionNode.getStartKey());
-    //   Assertions.assertNotNull(compactionNode.getEndKey());
-    // });
+
     GenericTestUtils.waitFor(() -> rocksDBCheckpointDiffer.getInflightCompactions().isEmpty(), 1000,
         10000);
     if (LOG.isDebugEnabled()) {
-      rocksDBCheckpointDiffer.dumpCompactionNodeTable();
+      rocksDBCheckpointDiffer.dumpFlushLists();
     }
   }
 
@@ -1048,12 +1035,6 @@ public class TestRocksDBCheckpointDiffer {
         }
         for (String diffFile : expectedDifferResult.get(index)) {
           String columnFamily;
-          // TODO: HDDS-13874 - Comment out CompactionNodeMap lookup, will use L0 files list
-          // if (rocksDBCheckpointDiffer.getCompactionNodeMap().containsKey(diffFile)) {
-          //   columnFamily = rocksDBCheckpointDiffer.getCompactionNodeMap().get(diffFile).getColumnFamily();
-          // } else {
-          //   columnFamily = src.getSstFile(0, diffFile).getColumnFamily();
-          // }
           columnFamily = src.getSstFile(0, diffFile).getColumnFamily();
           if (columnFamily == null || tableToLookUp.contains(columnFamily)) {
             expectedDiffFiles.add(diffFile);
@@ -1201,13 +1182,6 @@ public class TestRocksDBCheckpointDiffer {
         LOG.debug("\tLevel: {}", m.level());
         LOG.debug("\tTable: {}", bytes2String(m.columnFamilyName()));
         LOG.debug("\tKey Range: {}", bytes2String(m.smallestKey()) + " <-> " + bytes2String(m.largestKey()));
-        if (debugEnabled(DEBUG_DAG_LIVE_NODES)) {
-          // TODO: HDDS-13874 - Comment out DAG debug printing, will print L0 files list
-          // printMutableGraphFromAGivenNode(
-          //     differ.getCompactionNodeMap(),
-          //     m.fileName(), m.level(),
-          //     differ.getForwardCompactionDAG());
-        }
       }
 
       if (debugEnabled(DEBUG_READ_ALL_DB_KEYS)) {
@@ -1235,105 +1209,6 @@ public class TestRocksDBCheckpointDiffer {
   public boolean debugEnabled(Integer level) {
     return DEBUG_LEVEL.contains(level);
   }
-
-  // TODO: HDDS-13874 - Comment out CompactionNode-based helper methods
-  // These will be replaced with FlushList-based helpers
-  // /**
-  //  * Helper that traverses the graphs for testing.
-  //  * @param compactionNodeMap
-  //  * @param reverseMutableGraph
-  //  * @param fwdMutableGraph
-  //  */
-  // private void traverseGraph(
-  //     ConcurrentMap<String, CompactionNode> compactionNodeMap,
-  //     MutableGraph<CompactionNode> reverseMutableGraph,
-  //     MutableGraph<CompactionNode> fwdMutableGraph) {
-  //
-  //   List<CompactionNode> nodeList = compactionNodeMap.values().stream()
-  //       .sorted(new NodeComparator()).collect(Collectors.toList());
-  //
-  //   for (CompactionNode infileNode : nodeList) {
-  //     // fist go through fwdGraph to find nodes that don't have successors.
-  //     // These nodes will be the top level nodes in reverse graph
-  //     Set<CompactionNode> successors = fwdMutableGraph.successors(infileNode);
-  //     if (successors.isEmpty()) {
-  //       LOG.debug("No successors. Cumulative keys: {}, total keys: {}",
-  //           infileNode.getCumulativeKeysReverseTraversal(),
-  //           infileNode.getTotalNumberOfKeys());
-  //       infileNode.setCumulativeKeysReverseTraversal(
-  //           infileNode.getTotalNumberOfKeys());
-  //     }
-  //   }
-  //
-  //   Set<CompactionNode> visited = new HashSet<>();
-  //
-  //   for (CompactionNode> infileNode : nodeList) {
-  //     if (visited.contains(infileNode)) {
-  //       continue;
-  //     }
-  //     visited.add(infileNode);
-  //     LOG.debug("Visiting node '{}'", infileNode.getFileName());
-  //     Set<CompactionNode> currentLevel = new HashSet<>();
-  //     currentLevel.add(infileNode);
-  //     int level = 1;
-  //     while (!currentLevel.isEmpty()) {
-  //       LOG.debug("BFS Level: {}. Current level has {} nodes",
-  //           level++, currentLevel.size());
-  //       final Set<CompactionNode> nextLevel = new HashSet<>();
-  //       for (CompactionNode current : currentLevel) {
-  //         LOG.debug("Expanding node: {}", current.getFileName());
-  //         Set<CompactionNode> successors =
-  //             reverseMutableGraph.successors(current);
-  //         if (successors.isEmpty()) {
-  //           LOG.debug("No successors. Cumulative keys: {}",
-  //               current.getCumulativeKeysReverseTraversal());
-  //           continue;
-  //         }
-  //         for (CompactionNode node : successors) {
-  //           LOG.debug("Adding to the next level: {}", node.getFileName());
-  //           LOG.debug("'{}' cumulative keys: {}. parent '{}' total keys: {}",
-  //               node.getFileName(), node.getCumulativeKeysReverseTraversal(),
-  //               current.getFileName(), current.getTotalNumberOfKeys());
-  //           node.addCumulativeKeysReverseTraversal(
-  //               current.getCumulativeKeysReverseTraversal());
-  //           nextLevel.add(node);
-  //         }
-  //       }
-  //       currentLevel = nextLevel;
-  //     }
-  //   }
-  // }
-  //
-  // private void printMutableGraphFromAGivenNode(
-  //     ConcurrentMap<String, CompactionNode> compactionNodeMap,
-  //     String fileName,
-  //     int sstLevel,
-  //     MutableGraph<CompactionNode> mutableGraph) {
-  //
-  //   CompactionNode infileNode = compactionNodeMap.get(fileName);
-  //   if (infileNode == null) {
-  //     return;
-  //   }
-  //   LOG.debug("Expanding file: {}. SST compaction level: {}",
-  //       fileName, sstLevel);
-  //   Set<CompactionNode> currentLevel = new HashSet<>();
-  //   currentLevel.add(infileNode);
-  //   int levelCounter = 1;
-  //   while (!currentLevel.isEmpty()) {
-  //     LOG.debug("DAG Level: {}", levelCounter++);
-  //     final Set<CompactionNode> nextLevel = new HashSet<>();
-  //     StringBuilder sb = new StringBuilder();
-  //     for (CompactionNode current : currentLevel) {
-  //       Set<CompactionNode> successors = mutableGraph.successors(current);
-  //       for (CompactionNode succNode : successors) {
-  //         sb.append(succNode.getFileName()).append(' ');
-  //         nextLevel.add(succNode);
-  //       }
-  //     }
-  //     LOG.debug("{}", sb);
-  //     currentLevel = nextLevel;
-  //   }
-  // }
 
   // Take the lock, confirm that the consumer doesn't finish
   //  then release the lock and confirm that the consumer does finish.
@@ -1792,58 +1667,6 @@ public class TestRocksDBCheckpointDiffer {
         Arguments.of(columnFamilyToPrefixMap3, expectedResponse3));
   }
 
-  // TODO: HDDS-13874 - Comment out testShouldSkipNode, will rewrite as testShouldSkipL0File
-  // @ParameterizedTest()
-  // @MethodSource("shouldSkipNodeCases")
-  // public void testShouldSkipNode(TablePrefixInfo tablePrefixInfo,
-  //                                List<Boolean> expectedResponse) {
-  //   compactionLogEntryList.forEach(entry ->
-  //       rocksDBCheckpointDiffer.addToCompactionLogTable(entry));
-  //
-  //   rocksDBCheckpointDiffer.loadAllCompactionLogs();
-  //
-  //   List<Boolean> actualResponse = rocksDBCheckpointDiffer
-  //       .getCompactionNodeMap().values().stream()
-  //       .sorted(Comparator.comparing(CompactionNode::getFileName))
-  //       .map(node ->
-  //           RocksDiffUtils.shouldSkipNode(node, tablePrefixInfo, tablePrefixInfo.getTableNames()))
-  //       .collect(Collectors.toList());
-  //
-  //   assertEquals(expectedResponse, actualResponse);
-  // }
-
-  // TODO: HDDS-13874 - Comment out shouldSkipNodeEdgeCases and testShouldSkipNodeEdgeCase
-  // Will rewrite with L0SstFile instead of CompactionNode
-  // private static Stream<Arguments> shouldSkipNodeEdgeCases() {
-  //   CompactionNode node = new CompactionNode("fileName", 100, "startKey", "endKey", "columnFamily");
-  //   CompactionNode nullColumnFamilyNode = new CompactionNode("fileName", 100, "startKey", "endKey", null);
-  //   CompactionNode nullStartKeyNode = new CompactionNode("fileName", 100, null, "endKey", "columnFamily");
-  //   CompactionNode nullEndKeyNode = new CompactionNode("fileName", 100, "startKey", null, "columnFamily");
-  //
-  //   return Stream.of(
-  //       Arguments.of(node, new TablePrefixInfo(Collections.emptyMap()), false),
-  //       Arguments.of(node, columnFamilyToPrefixMap1, true),
-  //       Arguments.of(nullColumnFamilyNode, columnFamilyToPrefixMap1, false),
-  //       Arguments.of(nullStartKeyNode, columnFamilyToPrefixMap1, false),
-  //       Arguments.of(nullEndKeyNode, columnFamilyToPrefixMap1, false));
-  // }
-  //
-  // @ParameterizedTest()
-  // @MethodSource("shouldSkipNodeEdgeCases")
-  // public void testShouldSkipNodeEdgeCase(
-  //     CompactionNode node,
-  //     TablePrefixInfo columnFamilyPrefixInfo,
-  //     boolean expectedResponse
-  // ) {
-  //   compactionLogEntryList.forEach(entry ->
-  //       rocksDBCheckpointDiffer.addToCompactionLogTable(entry));
-  //
-  //   rocksDBCheckpointDiffer.loadAllCompactionLogs();
-  //
-  //   assertEquals(expectedResponse, RocksDiffUtils.shouldSkipNode(node,
-  //       columnFamilyPrefixInfo, columnFamilyPrefixInfo.getTableNames()));
-  // }
-
   private void createKeys(ColumnFamilyHandle cfh,
                           String keyPrefix,
                           String valuePrefix,
@@ -1863,10 +1686,8 @@ public class TestRocksDBCheckpointDiffer {
     }
   }
 
-  // End-to-end to verify that only 'keyTable', 'directoryTable'
-  // and 'fileTable' column families SST files are added to compaction DAG.
-  // TODO: HDDS-13874 - Deleted testDagOnlyContainsDesiredCfh() - DAG no longer used
-  // Will add testFlushListOnlyContainsDesiredCfh() after LinkedList implementation
+  // Verify that only 'keyTable', 'directoryTable' and 'fileTable' column families
+  // are tracked in FlushLists (tested via shouldSkipCompaction)
 
   private static Stream<Arguments> shouldSkipFileCases() {
     return Stream.of(
@@ -1916,5 +1737,141 @@ public class TestRocksDBCheckpointDiffer {
                                  boolean expectedResult) {
     assertEquals(expectedResult, rocksDBCheckpointDiffer
         .shouldSkipCompaction(columnFamilyBytes, inputFiles, outputFiles));
+  }
+
+  // HDDS-13874: FlushList-related tests
+
+  @Test
+  public void testOnSnapshotCreatedCreatesFlushList() {
+    // Given: Some flushed files in the current interval
+    String snapshotId = "snap-001";
+    long previousSeqNum = 100L;
+    long currentSeqNum = 200L;
+
+    // When: Snapshot is created
+    rocksDBCheckpointDiffer.onSnapshotCreated(snapshotId, currentSeqNum);
+
+    // Then: FlushList should be created and stored
+    FlushList flushList = rocksDBCheckpointDiffer.getFlushList(snapshotId);
+    assertThat(flushList).isNotNull();
+    assertThat(flushList.getToSnapshotSeqNum()).isEqualTo(currentSeqNum);
+  }
+
+  @Test
+  public void testGetFlushListReturnsNullForNonExistentSnapshot() {
+    // When: Getting FlushList for non-existent snapshot
+    FlushList flushList = rocksDBCheckpointDiffer.getFlushList("non-existent-snap");
+
+    // Then: Should return null
+    assertThat(flushList).isNull();
+  }
+
+  @Test
+  public void testRemoveFlushListRemovesExistingFlushList() {
+    // Given: A snapshot with FlushList
+    String snapshotId = "snap-002";
+    rocksDBCheckpointDiffer.onSnapshotCreated(snapshotId, 300L);
+    assertThat(rocksDBCheckpointDiffer.getFlushList(snapshotId)).isNotNull();
+
+    // When: Removing the FlushList
+    boolean removed = rocksDBCheckpointDiffer.removeFlushList(snapshotId);
+
+    // Then: Should be removed successfully
+    assertThat(removed).isTrue();
+    assertThat(rocksDBCheckpointDiffer.getFlushList(snapshotId)).isNull();
+  }
+
+  @Test
+  public void testRemoveFlushListReturnsFalseForNonExistentSnapshot() {
+    // When: Removing FlushList for non-existent snapshot
+    boolean removed = rocksDBCheckpointDiffer.removeFlushList("non-existent");
+
+    // Then: Should return false
+    assertThat(removed).isFalse();
+  }
+
+  @Test
+  public void testRemoveFlushListsRemovesMultipleFlushLists() {
+    // Given: Multiple snapshots with FlushLists
+    String snap1 = "snap-003";
+    String snap2 = "snap-004";
+    String snap3 = "snap-005";
+    rocksDBCheckpointDiffer.onSnapshotCreated(snap1, 400L);
+    rocksDBCheckpointDiffer.onSnapshotCreated(snap2, 500L);
+    rocksDBCheckpointDiffer.onSnapshotCreated(snap3, 600L);
+
+    // When: Removing multiple FlushLists
+    Set<String> snapshotIds = ImmutableSet.of(snap1, snap2);
+    int removedCount = rocksDBCheckpointDiffer.removeFlushLists(snapshotIds);
+
+    // Then: Should remove specified FlushLists
+    assertThat(removedCount).isEqualTo(2);
+    assertThat(rocksDBCheckpointDiffer.getFlushList(snap1)).isNull();
+    assertThat(rocksDBCheckpointDiffer.getFlushList(snap2)).isNull();
+    assertThat(rocksDBCheckpointDiffer.getFlushList(snap3)).isNotNull();
+  }
+
+  @Test
+  public void testGetFlushedFilesBetweenSnapshotsReturnsEmptyForNullInputs() {
+    // When: Calling with null parameters
+    List<FlushedSstFile> result1 =
+        rocksDBCheckpointDiffer.getFlushedFilesBetweenSnapshots(null, "snap-1");
+    List<FlushedSstFile> result2 =
+        rocksDBCheckpointDiffer.getFlushedFilesBetweenSnapshots("snap-1", null);
+
+    // Then: Should return empty list
+    assertThat(result1).isEmpty();
+    assertThat(result2).isEmpty();
+  }
+
+  @Test
+  public void testGetFlushedFilesBetweenSnapshotsReturnsEmptyForSameSnapshot() {
+    // When: From and To snapshots are the same
+    List<FlushedSstFile> result =
+        rocksDBCheckpointDiffer.getFlushedFilesBetweenSnapshots("snap-1", "snap-1");
+
+    // Then: Should return empty list
+    assertThat(result).isEmpty();
+  }
+
+  @Test
+  public void testGetFlushedFilesBetweenSnapshotsReturnsEmptyWhenFlushListMissing() {
+    // When: FlushList doesn't exist for the snapshot
+    List<FlushedSstFile> result =
+        rocksDBCheckpointDiffer.getFlushedFilesBetweenSnapshots("snap-old", "snap-new");
+
+    // Then: Should return empty list (fallback to full diff)
+    assertThat(result).isEmpty();
+  }
+
+  @Test
+  public void testIdentifySstFilesForPruningReturnsInputFiles() {
+    // Given: Set of SST file names
+    Set<String> sstFileNames = ImmutableSet.of("file1", "file2", "file3");
+
+    // When: Identifying files for pruning
+    Set<String> result = rocksDBCheckpointDiffer.identifySstFilesForPruning(sstFileNames);
+
+    // Then: Should return all input files
+    assertThat(result).containsExactlyInAnyOrderElementsOf(sstFileNames);
+  }
+
+  @Test
+  public void testIdentifySstFilesForPruningReturnsEmptyForNullInput() {
+    // When: Passing null
+    Set<String> result = rocksDBCheckpointDiffer.identifySstFilesForPruning(null);
+
+    // Then: Should return empty set
+    assertThat(result).isEmpty();
+  }
+
+  @Test
+  public void testIdentifySstFilesForPruningReturnsEmptyForEmptyInput() {
+    // When: Passing empty set
+    Set<String> result =
+        rocksDBCheckpointDiffer.identifySstFilesForPruning(Collections.emptySet());
+
+    // Then: Should return empty set
+    assertThat(result).isEmpty();
   }
 }
