@@ -123,7 +123,7 @@ public class FlushListPrinter extends AbstractSubcommand implements Callable<Voi
     Graph<String, DefaultEdge> graph = new DefaultDirectedGraph<>(DefaultEdge.class);
 
     // Add snapshot node at the top
-    String snapshotNode = String.format("Snapshot: %s\n(seq: %d -> %d)",
+    String snapshotNode = String.format("Snapshot: %s%n(seq: %d -> %d)",
         snapshotId, flushList.getFromSnapshotSeqNum(), flushList.getToSnapshotSeqNum());
     graph.addVertex(snapshotNode);
 
@@ -131,9 +131,8 @@ public class FlushListPrinter extends AbstractSubcommand implements Callable<Voi
     List<FlushedSstFile> files = flushList.getFlushedFiles();
 
     // Add nodes for each flushed file in chronological order
-    for (int i = 0; i < files.size(); i++) {
-      FlushedSstFile file = files.get(i);
-      String nodeLabel = String.format("[%d] %s\n(%s)",
+    for (FlushedSstFile file : files) {
+      String nodeLabel = String.format("[%d] %s%n(%s)",
           file.getSequenceNumber(),
           file.getFileName(),
           file.getColumnFamily() != null ? file.getColumnFamily() : "default");

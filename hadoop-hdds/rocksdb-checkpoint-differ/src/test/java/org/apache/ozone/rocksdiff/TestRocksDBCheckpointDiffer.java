@@ -1651,41 +1651,6 @@ public class TestRocksDBCheckpointDiffer {
     assertEquals(expectedDiffSstFiles, actualDiffSstFiles.keySet());
   }
 
-  private static Stream<Arguments> shouldSkipNodeCases() {
-    List<Boolean> expectedResponse1 = Arrays.asList(true, false, true, false,
-        false, false, false, false, true, true, false, false, false, false,
-        false, true, true, true, true, true, false);
-    List<Boolean> expectedResponse2 = Arrays.asList(true, true, true, false,
-        false, false, false, false, true, true, false, false, false, false,
-        false, true, false, false, false, false, false);
-    List<Boolean> expectedResponse3 = Arrays.asList(true, true, true, true,
-        true, true, true, true, true, true, false, false, false, false, false,
-        true, false, false, false, false, false);
-    return Stream.of(
-        Arguments.of(columnFamilyToPrefixMap1, expectedResponse1),
-        Arguments.of(columnFamilyToPrefixMap2, expectedResponse2),
-        Arguments.of(columnFamilyToPrefixMap3, expectedResponse3));
-  }
-
-  private void createKeys(ColumnFamilyHandle cfh,
-                          String keyPrefix,
-                          String valuePrefix,
-                          int numberOfKeys) throws RocksDBException {
-
-    try (ManagedFlushOptions flushOptions = new ManagedFlushOptions()) {
-      for (int i = 0; i < numberOfKeys; ++i) {
-        String generatedString = RandomStringUtils.secure().nextAlphabetic(7);
-        String keyStr = keyPrefix + i + "-" + generatedString;
-        String valueStr = valuePrefix + i + "-" + generatedString;
-        byte[] key = keyStr.getBytes(UTF_8);
-        activeRocksDB.get().put(cfh, key, valueStr.getBytes(UTF_8));
-        if (i % 10 == 0) {
-          activeRocksDB.get().flush(flushOptions, cfh);
-        }
-      }
-    }
-  }
-
   // Verify that only 'keyTable', 'directoryTable' and 'fileTable' column families
   // are tracked in FlushLists (tested via shouldSkipCompaction)
 

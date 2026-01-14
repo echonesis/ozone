@@ -527,7 +527,7 @@ public class RocksDBCheckpointDiffer implements AutoCloseable,
     int maxTraversalDepth = 1000; // Safety limit to prevent infinite loops
 
     // Traverse the snapshot chain backwards from toSnapshot to fromSnapshot
-    while (currentSnapshotId != null && !currentSnapshotId.equals(fromSnapshotId)) {
+    while (!currentSnapshotId.equals(fromSnapshotId)) {
       if (++traversalCount > maxTraversalDepth) {
         LOG.error("Snapshot chain traversal exceeded max depth of {}. " +
             "Possible circular reference or very long chain. " +
