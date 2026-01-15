@@ -110,7 +110,6 @@ import org.apache.ozone.compaction.log.CompactionFileInfo;
 import org.apache.ozone.compaction.log.CompactionLogEntry;
 import org.apache.ozone.rocksdb.util.SstFileInfo;
 import org.apache.ozone.rocksdiff.RocksDBCheckpointDiffer.DifferSnapshotVersion;
-import org.apache.ozone.rocksdiff.RocksDiffUtils;
 import org.apache.ozone.test.GenericTestUtils;
 import org.apache.ratis.util.UncheckedAutoCloseable;
 import org.junit.jupiter.api.AfterEach;
@@ -141,110 +140,6 @@ public class TestRocksDBCheckpointDiffer {
   private static File dbDir;
 
   private static final Logger LOG = LoggerFactory.getLogger(TestRocksDBCheckpointDiffer.class);
-
-  private final List<CompactionLogEntry> compactionLogEntryList = Arrays.asList(
-      new CompactionLogEntry(101, System.currentTimeMillis(),
-          Arrays.asList(
-              new CompactionFileInfo("000068", "/volume/bucket2",
-                  "/volume/bucket2", "bucketTable"),
-              new CompactionFileInfo("000057", "/volume/bucket1",
-                  "/volume/bucket1", "bucketTable")),
-          Collections.singletonList(
-              new CompactionFileInfo("000086", "/volume/bucket1",
-                  "/volume/bucket2", "bucketTable")),
-          null),
-      new CompactionLogEntry(178, System.currentTimeMillis(),
-          Arrays.asList(new CompactionFileInfo("000078",
-                  "/volume/bucket1/key-0000001411",
-                  "/volume/bucket2/key-0000099649",
-                  "keyTable"),
-              new CompactionFileInfo("000075",
-                  "/volume/bucket1/key-0000016536",
-                  "/volume/bucket2/key-0000098897",
-                  "keyTable"),
-              new CompactionFileInfo("000073",
-                  "/volume/bucket1/key-0000000730",
-                  "/volume/bucket2/key-0000097010",
-                  "keyTable"),
-              new CompactionFileInfo("000071",
-                  "/volume/bucket1/key-0000001820",
-                  "/volume/bucket2/key-0000097895",
-                  "keyTable"),
-              new CompactionFileInfo("000063",
-                  "/volume/bucket1/key-0000001016",
-                  "/volume/bucket1/key-0000099930",
-                  "keyTable")),
-          Collections.singletonList(new CompactionFileInfo("000081",
-              "/volume/bucket1/key-0000000730",
-              "/volume/bucket2/key-0000099649",
-              "keyTable")),
-          null
-      ),
-      new CompactionLogEntry(233, System.currentTimeMillis(),
-          Arrays.asList(
-              new CompactionFileInfo("000086", "/volume/bucket1",
-                  "/volume/bucket2", "bucketTable"),
-              new CompactionFileInfo("000088", "/volume/bucket3",
-                  "/volume/bucket3", "bucketTable")),
-          Collections.singletonList(
-              new CompactionFileInfo("000110", "/volume/bucket1",
-                  "/volume/bucket3", "bucketTable")
-          ),
-          null),
-      new CompactionLogEntry(256, System.currentTimeMillis(),
-          Arrays.asList(new CompactionFileInfo("000081",
-                  "/volume/bucket1/key-0000000730",
-                  "/volume/bucket2/key-0000099649",
-                  "keyTable"),
-              new CompactionFileInfo("000103",
-                  "/volume/bucket1/key-0000017460",
-                  "/volume/bucket3/key-0000097450",
-                  "keyTable"),
-              new CompactionFileInfo("000099",
-                  "/volume/bucket1/key-0000002310",
-                  "/volume/bucket3/key-0000098286",
-                  "keyTable"),
-              new CompactionFileInfo("000097",
-                  "/volume/bucket1/key-0000005965",
-                  "/volume/bucket3/key-0000099136",
-                  "keyTable"),
-              new CompactionFileInfo("000095",
-                  "/volume/bucket1/key-0000012424",
-                  "/volume/bucket3/key-0000083904",
-                  "keyTable")),
-          Collections.singletonList(new CompactionFileInfo("000106",
-              "/volume/bucket1/key-0000000730",
-              "/volume/bucket3/key-0000099136",
-              "keyTable")),
-          null),
-      new CompactionLogEntry(397, now(),
-          Arrays.asList(new CompactionFileInfo("000106",
-                  "/volume/bucket1/key-0000000730",
-                  "/volume/bucket3/key-0000099136",
-                  "keyTable"),
-              new CompactionFileInfo("000128",
-                  "/volume/bucket2/key-0000005031",
-                  "/volume/bucket3/key-0000084385",
-                  "keyTable"),
-              new CompactionFileInfo("000125",
-                  "/volume/bucket2/key-0000003491",
-                  "/volume/bucket3/key-0000088414",
-                  "keyTable"),
-              new CompactionFileInfo("000123",
-                  "/volume/bucket2/key-0000007390",
-                  "/volume/bucket3/key-0000094627",
-                  "keyTable"),
-              new CompactionFileInfo("000121",
-                  "/volume/bucket2/key-0000003232",
-                  "/volume/bucket3/key-0000094246",
-                  "keyTable")),
-          Collections.singletonList(new CompactionFileInfo("000131",
-              "/volume/bucket1/key-0000000730",
-              "/volume/bucket3/key-0000099136",
-              "keyTable")),
-          null
-      )
-  );
 
   private static TablePrefixInfo columnFamilyToPrefixMap1 =
       new TablePrefixInfo(new HashMap<String, String>() {
@@ -936,22 +831,8 @@ public class TestRocksDBCheckpointDiffer {
     // and calculate expectations based on actual fallback behavior.
 
     // Fallback logic: files in both = same, files in only one = different
-    Set<String> expectedSameByFallback = new HashSet<>(srcSnapshotSstFiles);
-    expectedSameByFallback.retainAll(destSnapshotSstFiles); // Intersection
-
-    Set<String> expectedDiffByFallback = new HashSet<>();
-    // Files only in src
-    for (String file : srcSnapshotSstFiles) {
-      if (!destSnapshotSstFiles.contains(file)) {
-        expectedDiffByFallback.add(file);
-      }
-    }
-    // Files only in dest
-    for (String file : destSnapshotSstFiles) {
-      if (!srcSnapshotSstFiles.contains(file)) {
-        expectedDiffByFallback.add(file);
-      }
-    }
+    Set<String> expectedSameByFallback = calculateExpectedSameFiles(srcSnapshotSstFiles, destSnapshotSstFiles);
+    Set<String> expectedDiffByFallback = calculateExpectedDiffFiles(srcSnapshotSstFiles, destSnapshotSstFiles);
 
     // Check same and different SST files result using fallback expectations
     assertEquals(expectedSameByFallback, actualSameSstFiles.keySet(),
@@ -975,30 +856,8 @@ public class TestRocksDBCheckpointDiffer {
     try {
       // HDDS-13874: Apply prefix filtering to fallback expectation
       // getSSTDiffList() applies filterRelevantSstFiles() if prefixInfo is not null
-      Set<String> filteredDiffByFallback = new HashSet<>(expectedDiffByFallback);
-      if (prefixInfo != null && prefixInfo.size() != 0) {
-        // Simulate the filtering that happens in getSSTDiffList()
-        filteredDiffByFallback.removeIf(fileName -> {
-          SstFileInfo fileInfo = metaDataMap.get(fileName);
-          if (fileInfo == null) {
-            // No metadata means no filtering (backward compatibility)
-            return false;
-          }
-          // Check if should skip based on RocksDiffUtils.shouldSkipNode logic
-          if (fileInfo.getStartKey() == null || fileInfo.getEndKey() == null || fileInfo.getColumnFamily() == null) {
-            return false;
-          }
-          if (!tablesToLookup.contains(fileInfo.getColumnFamily())) {
-            return true; // Skip if column family not in tablesToLookup
-          }
-          String keyPrefix = prefixInfo.getTablePrefix(fileInfo.getColumnFamily());
-          if (keyPrefix == null) {
-            return false; // Column family not in prefixInfo, don't skip
-          }
-          // Check if key range contains the prefix
-          return !RocksDiffUtils.isKeyWithPrefixPresent(keyPrefix, fileInfo.getStartKey(), fileInfo.getEndKey());
-        });
-      }
+      Set<String> filteredDiffByFallback = applyPrefixFiltering(expectedDiffByFallback, metaDataMap,
+          prefixInfo, tablesToLookup);
 
       List<String> expectedDiffByFallbackList = filteredDiffByFallback.stream()
           .sorted()
@@ -1021,6 +880,54 @@ public class TestRocksDBCheckpointDiffer {
       fail("Expecting exception but none thrown.");
     }
 
+  }
+
+  private Set<String> calculateExpectedSameFiles(Set<String> srcFiles, Set<String> destFiles) {
+    Set<String> sameFiles = new HashSet<>(srcFiles);
+    sameFiles.retainAll(destFiles); // Intersection
+    return sameFiles;
+  }
+
+  private Set<String> calculateExpectedDiffFiles(Set<String> srcFiles, Set<String> destFiles) {
+    Set<String> diffFiles = new HashSet<>();
+    // Files only in src
+    for (String file : srcFiles) {
+      if (!destFiles.contains(file)) {
+        diffFiles.add(file);
+      }
+    }
+    // Files only in dest
+    for (String file : destFiles) {
+      if (!srcFiles.contains(file)) {
+        diffFiles.add(file);
+      }
+    }
+    return diffFiles;
+  }
+
+  private Set<String> applyPrefixFiltering(Set<String> files, Map<String, SstFileInfo> metaDataMap,
+      TablePrefixInfo prefixInfo, Set<String> tablesToLookup) {
+    Set<String> filteredFiles = new HashSet<>(files);
+    if (prefixInfo != null && prefixInfo.size() != 0) {
+      filteredFiles.removeIf(fileName -> {
+        SstFileInfo fileInfo = metaDataMap.get(fileName);
+        if (fileInfo == null) {
+          return false;
+        }
+        if (fileInfo.getStartKey() == null || fileInfo.getEndKey() == null || fileInfo.getColumnFamily() == null) {
+          return false;
+        }
+        if (!tablesToLookup.contains(fileInfo.getColumnFamily())) {
+          return true;
+        }
+        String keyPrefix = prefixInfo.getTablePrefix(fileInfo.getColumnFamily());
+        if (keyPrefix == null) {
+          return false;
+        }
+        return !RocksDiffUtils.isKeyWithPrefixPresent(keyPrefix, fileInfo.getStartKey(), fileInfo.getEndKey());
+      });
+    }
+    return filteredFiles;
   }
 
   /**
