@@ -2176,7 +2176,8 @@ public abstract class TestOmSnapshot {
     RDBStore activeDbStore = getRdbStore();
     // RocksDBCheckpointDiffer should be not null for active DB store.
     assertNotNull(activeDbStore.getRocksDBCheckpointDiffer());
-    assertEquals(2,  activeDbStore.getDbOptions().listeners().size());
+    // HDDS-13874: Now expects 3 listeners (compaction begin, compaction completed, flush completed)
+    assertEquals(3,  activeDbStore.getDbOptions().listeners().size());
 
     try (UncheckedAutoCloseableSupplier<IOmMetadataReader> omSnapshot = cluster.getOzoneManager()
         .getOmSnapshotManager()

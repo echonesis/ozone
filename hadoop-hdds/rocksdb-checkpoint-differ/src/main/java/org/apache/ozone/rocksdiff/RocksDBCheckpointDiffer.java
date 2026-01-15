@@ -1495,20 +1495,35 @@ public class RocksDBCheckpointDiffer implements AutoCloseable,
     }
 
     // HDDS-13874: With FlushList, we track L0 files directly.
-    // Compacted files (non-L0) can potentially be pruned more aggressively,
-    // but we need to ensure they're not referenced by any active snapshot.
-    // For now, rely on the time-based pruning in pruneOlderSnapshotsWithCompactionHistory()
+    // However, we still need to prune compacted output files from the backup directory.
+    // Output files of compactions are intermediate files that can be removed since
+    // we keep the original input files for historical snapshots.
 
     Set<String> sstFilesToPrune;
     synchronized (this) {
-      // TODO: HDDS-13874 - Implement FlushList-aware pruning strategy
-      // Potential approach:
-      // 1. Collect all SST files referenced in active FlushLists
-      // 2. Identify SST files in backup dir not in any FlushList
-      // 3. Remove those files (they're compacted outputs no longer needed)
-      //
-      // For now, no additional pruning beyond time-based pruning
-      sstFilesToPrune = Collections.emptySet();
+      // Collect all output files from compaction log entries.
+      // These are intermediate files that have been created by compacting input files.
+      sstFilesToPrune = new HashSet<>();
+
+      try (ManagedRocksIterator managedRocksIterator = new ManagedRocksIterator(
+          activeRocksDB.get().newIterator(compactionLogTableCFHandle))) {
+        managedRocksIterator.get().seekToFirst();
+        while (managedRocksIterator.get().isValid()) {
+          byte[] value = managedRocksIterator.get().value();
+          CompactionLogEntry compactionLogEntry =
+              CompactionLogEntry.getFromProtobuf(CompactionLogEntryProto.parseFrom(value));
+
+          // Add all output files from this compaction to the prune set
+          for (CompactionFileInfo outputFileInfo : compactionLogEntry.getOutputFileInfoList()) {
+            sstFilesToPrune.add(outputFileInfo.getFileName());
+          }
+
+          managedRocksIterator.get().next();
+        }
+      } catch (InvalidProtocolBufferException e) {
+        LOG.error("Failed to parse compaction log entry during SST file pruning", e);
+        throw new RuntimeException(e);
+      }
     }
 
     if (CollectionUtils.isNotEmpty(sstFilesToPrune)) {
