@@ -288,7 +288,7 @@ public class OMDBCheckpointServletInodeBasedXfer extends DBCheckpointServlet {
         SnapshotCache snapshotCache = om.getOmSnapshotManager().getSnapshotCache();
         OmSnapshotLocalDataManager localDataManager = om.getOmSnapshotManager().getSnapshotLocalDataManager();
         /*
-         * Acquire snapshot cache lock when includeSnapshotData is true to prevent race conditions
+         * Acquire snapshot cache and local data locks when includeSnapshotData is true to prevent race conditions
          * between checkpoint operations and snapshot purge operations. Without this lock, a purge
          * operation (e.g., from a Ratis transaction on follower OM) could delete snapshot directories
          * while checkpoint is reading snapshot data, leading to FileNotFoundException or corrupted
