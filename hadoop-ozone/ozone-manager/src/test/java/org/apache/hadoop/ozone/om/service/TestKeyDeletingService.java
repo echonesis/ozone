@@ -111,6 +111,7 @@ import org.apache.ozone.test.GenericTestUtils;
 import org.apache.ozone.test.OzoneTestBase;
 import org.apache.ozone.test.tag.Flaky;
 import org.apache.ratis.util.ExitUtils;
+import org.apache.ratis.util.function.CheckedSupplier;
 import org.apache.ratis.util.function.UncheckedAutoCloseableSupplier;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -237,7 +238,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       final int keyCount = 100;
       createAndDeleteKeys(keyCount, 1);
 
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> getDeletedKeyCount() >= initialDeletedCount + keyCount,
           100, 10000);
       assertThat(getRunCount()).isGreaterThan(initialRunCount);
@@ -321,7 +322,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       // Delete the key
       writeClient.deleteKey(keyArgs);
 
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> getDeletedKeyCount() >= initialDeletedCount + 1,
           1000, 10000);
       assertThat(getRunCount())
@@ -375,7 +376,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       assertEquals(2, bucketInfo.getSnapshotUsedNamespace());
       keyDeletingService.resume();
       // Run KeyDeletingService
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> getDeletedKeyCount() >= initialDeletedCount + 2,
           1000, 100000);
       assertThat(getRunCount())
@@ -476,7 +477,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       assertNotNull(deletedTable.get(deletePathKey[0]));
       doAnswer(i -> {
         writeClient.createSnapshot(volumeName, bucketName, snap2);
-        GenericTestUtils.waitFor(() -> {
+        waitFor(() -> {
           try {
             SnapshotInfo snapshotInfo = writeClient.getSnapshotInfo(volumeName, bucketName, snap2);
             return OmSnapshotManager.areSnapshotChangesFlushedToDB(metadataManager, snapshotInfo);
@@ -484,7 +485,7 @@ class TestKeyDeletingService extends OzoneTestBase {
             throw new RuntimeException(e);
           }
         }, 1000, 100000);
-        GenericTestUtils.waitFor(() -> {
+        waitFor(() -> {
           try {
             return renameTable.get(metadataManager.getRenameKey(volumeName, bucketName, objectId.get())) == null;
           } catch (IOException e) {
@@ -813,7 +814,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       long prevSnapshotDirectorServiceCnt = directoryDeletingService.getRunCount().get();
       directoryDeletingService.resume();
       // Let SnapshotDirectoryCleaningService to run for some iterations
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> (directoryDeletingService.getRunCount().get() > prevSnapshotDirectorServiceCnt + 100),
           100, 100000);
       keyDeletingService.resume();
@@ -825,7 +826,7 @@ class TestKeyDeletingService extends OzoneTestBase {
           .put(snap4, 0L)
           .build();
       // Let KeyDeletingService run for some iterations
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> (getRunCount() > prevKdsRunCount + 20),
           100, 100000);
       // Check if the exclusive size is set.
@@ -921,11 +922,11 @@ class TestKeyDeletingService extends OzoneTestBase {
 
       createAndDeleteKeys(keyCount, 1);
 
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> countKeysPendingDeletion() == initialCount + keyCount,
           100, 2000);
       // Make sure that we have run the background thread 5 times more
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> getRunCount() >= initialRunCount + 5,
           100, 10000);
       // Since SCM calls are failing, deletedKeyCount should be zero.
@@ -942,11 +943,11 @@ class TestKeyDeletingService extends OzoneTestBase {
       createAndDeleteKeys(keyCount, 0);
 
       // the pre-allocated blocks are not committed, hence they will be deleted.
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> countKeysPendingDeletion() == initialCount + keyCount,
           100, 2000);
       // Make sure that we have run the background thread 2 times or more
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> getRunCount() >= initialRunCount + 2,
           100, 1000);
       // the blockClient is set to fail the deletion of key blocks, hence no keys
@@ -965,14 +966,14 @@ class TestKeyDeletingService extends OzoneTestBase {
       OmKeyArgs keyArg = createAndCommitKey(volumeName, bucketName, keyName, 3, 1);
 
       // Only the uncommitted block should be pending to be deleted.
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> countBlocksPendingDeletion() == initialCount + 1,
           500, 3000);
 
       writeClient.deleteKey(keyArg);
 
       // All blocks should be pending to be deleted.
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> countBlocksPendingDeletion() == initialCount + 3,
           500, 3000);
 
@@ -1065,7 +1066,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       }
 
       // Wait for snap2 to be flushed.
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> {
             try {
               SnapshotInfo snapshotInfo = writeClient.getSnapshotInfo(volumeName, bucketName, snap2);
@@ -1083,7 +1084,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       // snap2 to be deep cleaned.
       directoryDeletingService.runPeriodicalTaskNow();
       keyDeletingService.runPeriodicalTaskNow();
-      GenericTestUtils.waitFor(() -> getDeletedKeyCount() == 10, 100, 10000);
+      waitFor(() -> getDeletedKeyCount() == 10, 100, 10000);
       // Verify last run AOS deletion metrics.
       assertEquals(5, metrics.getAosKeysReclaimedLast());
       assertEquals(5 * dataSize * 3, metrics.getAosReclaimedSizeLast());
@@ -1102,7 +1103,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       writeClient.deleteSnapshot(volumeName, bucketName, snap1);
       keyManager.getSnapshotDeletingService().runPeriodicalTaskNow();
       // Wait for changes to the snap2 to be flushed.
-      GenericTestUtils.waitFor(
+      waitFor(
           () -> {
             try {
               SnapshotInfo snapshotInfo = writeClient.getSnapshotInfo(volumeName, bucketName, snap2);
@@ -1115,7 +1116,7 @@ class TestKeyDeletingService extends OzoneTestBase {
       // wait for snap2 to be deep cleaned.
       directoryDeletingService.runPeriodicalTaskNow();
       keyDeletingService.runPeriodicalTaskNow();
-      GenericTestUtils.waitFor(() -> getDeletedKeyCount() == 20, 100, 10000);
+      waitFor(() -> getDeletedKeyCount() == 20, 100, 10000);
 
       // Verify last run AOS deletion metrics.
       assertEquals(0, metrics.getAosKeysReclaimedLast());
@@ -1283,7 +1284,7 @@ class TestKeyDeletingService extends OzoneTestBase {
   private static void assertTableRowCount(Table<String, ?> table,
         long count, OMMetadataManager metadataManager)
       throws TimeoutException, InterruptedException {
-    GenericTestUtils.waitFor(() -> assertTableRowCount(count, table, metadataManager), 1000, 120000); // 2 minutes
+    waitFor(() -> assertTableRowCount(count, table, metadataManager), 1000, 120000); // 2 minutes
   }
 
   private static boolean assertTableRowCount(long expectedCount,
@@ -1418,6 +1419,12 @@ class TestKeyDeletingService extends OzoneTestBase {
     final long count = keyDeletingService.getRunCount().get();
     LOG.debug("KeyDeletingService run count: {}", count);
     return count;
+  }
+
+  private static void waitFor(CheckedSupplier<Boolean, RuntimeException> check,
+      int checkEveryMillis, int waitForMillis)
+      throws TimeoutException, InterruptedException {
+    GenericTestUtils.waitFor(check, checkEveryMillis, waitForMillis);
   }
 
   private int countKeysPendingDeletion() {
