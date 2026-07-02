@@ -30,11 +30,14 @@ import org.apache.hadoop.ozone.om.OMMetadataManager;
 import org.apache.hadoop.ozone.om.OmMetadataManagerImpl;
 import org.apache.hadoop.ozone.om.OmSnapshotManager;
 import org.apache.hadoop.ozone.om.helpers.SnapshotInfo;
+import org.apache.hadoop.ozone.om.lock.HierarchicalResourceLockManager.HierarchicalResourceLock;
+import org.apache.hadoop.ozone.om.lock.OMLockDetails;
 import org.apache.hadoop.ozone.om.response.CleanupTableInfo;
 import org.apache.hadoop.ozone.om.response.OMClientResponse;
 import org.apache.hadoop.ozone.om.snapshot.OmSnapshotLocalDataManager;
 import org.apache.hadoop.ozone.om.snapshot.OmSnapshotLocalDataManager.WritableOmSnapshotLocalDataProvider;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMResponse;
+import org.apache.ratis.util.function.UncheckedAutoCloseableSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -92,22 +95,25 @@ public class OMSnapshotPurgeResponse extends OMClientResponse {
         continue;
       }
       OmSnapshotManager omSnapshotManager = metadataManager.getOzoneManager().getOmSnapshotManager();
-      // Remove and close snapshot's RocksDB instance from SnapshotCache.
-      omSnapshotManager.invalidateCacheEntry(snapshotInfo.getSnapshotId());
-      // Remove the snapshot from snapshotId to snapshotTableKey map.
-      ((OmMetadataManagerImpl) omMetadataManager).getSnapshotChainManager()
-          .removeFromSnapshotIdToTable(snapshotInfo.getSnapshotId());
-
       OmSnapshotLocalDataManager snapshotLocalDataManager = ((OmMetadataManagerImpl) omMetadataManager)
           .getOzoneManager().getOmSnapshotManager().getSnapshotLocalDataManager();
-      // Update snapshot local data to update purge transaction info. This would be used to check whether the
-      // snapshot purged txn is flushed to rocksdb.
-      updateLocalData(snapshotLocalDataManager, snapshotInfo);
-      // Delete Snapshot checkpoint directory.
+      try (UncheckedAutoCloseableSupplier<OMLockDetails> snapshotDBLock = omSnapshotManager.getSnapshotCache().lock();
+          HierarchicalResourceLock snapshotLocalDataLock = snapshotLocalDataManager.lock()) {
+        // Remove and close snapshot's RocksDB instance from SnapshotCache.
+        omSnapshotManager.invalidateCacheEntry(snapshotInfo.getSnapshotId());
+        // Remove the snapshot from snapshotId to snapshotTableKey map.
+        ((OmMetadataManagerImpl) omMetadataManager).getSnapshotChainManager()
+            .removeFromSnapshotIdToTable(snapshotInfo.getSnapshotId());
 
-      omSnapshotManager.deleteSnapshotCheckpointDirectories(snapshotInfo.getSnapshotId(), -1);
-      // Delete snapshotInfo from the table.
-      omMetadataManager.getSnapshotInfoTable().deleteWithBatch(batchOperation, dbKey);
+        // Update snapshot local data to update purge transaction info. This would be used to check whether the
+        // snapshot purged txn is flushed to rocksdb.
+        updateLocalData(snapshotLocalDataManager, snapshotInfo);
+        // Delete Snapshot checkpoint directory.
+
+        omSnapshotManager.deleteSnapshotCheckpointDirectories(snapshotInfo.getSnapshotId(), -1);
+        // Delete snapshotInfo from the table.
+        omMetadataManager.getSnapshotInfoTable().deleteWithBatch(batchOperation, dbKey);
+      }
     }
   }
 
