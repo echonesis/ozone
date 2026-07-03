@@ -680,18 +680,27 @@ class TestKeyDeletingService extends OzoneTestBase {
 
         // 5 keys can be deep cleaned as it was stuck previously
         assertTableRowCount(snap3deletedTable, initialDeletedCount + 10, metadataManager);
-
-        writeClient.deleteSnapshot(volumeName, bucketName, snap2);
-        assertTableRowCount(snapshotInfoTable, initialSnapshotCount + 2, metadataManager);
-
-        directoryDeletingService.runPeriodicalTaskNow();
-        waitFor(() -> isDeletedDirDeepCleaned(volumeName, bucketName, snap3),
-            100, 10000);
-        keyDeletingService.runPeriodicalTaskNow();
-        assertTableRowCount(snap3deletedTable, initialDeletedCount, metadataManager);
-        assertTableRowCount(deletedTable, initialDeletedCount, metadataManager);
-        checkSnapDeepCleanStatus(snapshotInfoTable, volumeName, true);
       }
+
+      writeClient.deleteSnapshot(volumeName, bucketName, snap2);
+      assertTableRowCount(snapshotInfoTable, initialSnapshotCount + 2, metadataManager);
+
+      directoryDeletingService.runPeriodicalTaskNow();
+      waitFor(() -> isDeletedDirDeepCleaned(volumeName, bucketName, snap3),
+          100, 10000);
+      keyDeletingService.runPeriodicalTaskNow();
+
+      try (UncheckedAutoCloseableSupplier<OmSnapshot> rcOmSnapshot =
+               om.getOmSnapshotManager().getSnapshot(volumeName, bucketName, snap3)) {
+        OmSnapshot snapshot3 = rcOmSnapshot.get();
+        Table<String, RepeatedOmKeyInfo> snap3deletedTable =
+            snapshot3.getMetadataManager().getDeletedTable();
+
+        assertTableRowCount(snap3deletedTable, initialDeletedCount, metadataManager);
+      }
+
+      assertTableRowCount(deletedTable, initialDeletedCount, metadataManager);
+      checkSnapDeepCleanStatus(snapshotInfoTable, volumeName, true);
       sstFilteringService.resume();
     }
 
