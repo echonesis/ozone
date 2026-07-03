@@ -109,7 +109,6 @@ import org.apache.hadoop.ozone.om.snapshot.filter.ReclaimableKeyFilter;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos;
 import org.apache.ozone.test.GenericTestUtils;
 import org.apache.ozone.test.OzoneTestBase;
-import org.apache.ozone.test.tag.Flaky;
 import org.apache.ratis.util.ExitUtils;
 import org.apache.ratis.util.function.CheckedSupplier;
 import org.apache.ratis.util.function.UncheckedAutoCloseableSupplier;
@@ -607,7 +606,6 @@ class TestKeyDeletingService extends OzoneTestBase {
        of Snap3 should be empty.
      */
     @Test
-    @Flaky("HDDS-13880")
     void testSnapshotDeepClean() throws Exception {
       Table<String, SnapshotInfo> snapshotInfoTable =
           om.getMetadataManager().getSnapshotInfoTable();
@@ -668,6 +666,10 @@ class TestKeyDeletingService extends OzoneTestBase {
 
       keyDeletingService.resume();
       directoryDeletingService.resume();
+      directoryDeletingService.runPeriodicalTaskNow();
+      waitFor(() -> isDeletedDirDeepCleaned(volumeName, bucketName, snap3),
+          100, 10000);
+      keyDeletingService.runPeriodicalTaskNow();
 
       try (UncheckedAutoCloseableSupplier<OmSnapshot> rcOmSnapshot =
                om.getOmSnapshotManager().getSnapshot(volumeName, bucketName, snap3)) {
@@ -682,6 +684,10 @@ class TestKeyDeletingService extends OzoneTestBase {
         writeClient.deleteSnapshot(volumeName, bucketName, snap2);
         assertTableRowCount(snapshotInfoTable, initialSnapshotCount + 2, metadataManager);
 
+        directoryDeletingService.runPeriodicalTaskNow();
+        waitFor(() -> isDeletedDirDeepCleaned(volumeName, bucketName, snap3),
+            100, 10000);
+        keyDeletingService.runPeriodicalTaskNow();
         assertTableRowCount(snap3deletedTable, initialDeletedCount, metadataManager);
         assertTableRowCount(deletedTable, initialDeletedCount, metadataManager);
         checkSnapDeepCleanStatus(snapshotInfoTable, volumeName, true);
@@ -1278,6 +1284,16 @@ class TestKeyDeletingService extends OzoneTestBase {
               .isEqualTo(deepClean);
         }
       }
+    }
+  }
+
+  private boolean isDeletedDirDeepCleaned(String volumeName, String bucketName, String snapshotName) {
+    try {
+      SnapshotInfo snapshotInfo = writeClient.getSnapshotInfo(volumeName, bucketName, snapshotName);
+      return OmSnapshotManager.areSnapshotChangesFlushedToDB(metadataManager, snapshotInfo) &&
+          snapshotInfo.isDeepCleanedDeletedDir();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
     }
   }
 
