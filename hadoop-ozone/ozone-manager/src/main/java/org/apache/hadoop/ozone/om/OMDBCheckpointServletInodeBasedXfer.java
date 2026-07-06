@@ -288,7 +288,7 @@ public class OMDBCheckpointServletInodeBasedXfer extends DBCheckpointServlet {
         SnapshotCache snapshotCache = om.getOmSnapshotManager().getSnapshotCache();
         OmSnapshotLocalDataManager localDataManager = om.getOmSnapshotManager().getSnapshotLocalDataManager();
         /*
-         * Acquire snapshot local data and cache locks when includeSnapshotData is true to prevent race conditions
+         * Acquire snapshot cache and local data locks when includeSnapshotData is true to prevent race conditions
          * between checkpoint operations and snapshot purge operations. Without this lock, a purge
          * operation (e.g., from a Ratis transaction on follower OM) could delete snapshot directories
          * while checkpoint is reading snapshot data, leading to FileNotFoundException or corrupted
@@ -299,9 +299,9 @@ public class OMDBCheckpointServletInodeBasedXfer extends DBCheckpointServlet {
          * In this case, the try-with-resources block does not call close() on any resource,
          * which is intentional because snapshot consistency is not required.
          */
-        try (HierarchicalResourceLock snapshotLocalDataLock = includeSnapshotData ? localDataManager.lock() : null;
-             UncheckedAutoCloseableSupplier<OMLockDetails> snapshotDBLock =
-                 includeSnapshotData ? snapshotCache.lock() : null) {
+        try (UncheckedAutoCloseableSupplier<OMLockDetails> snapshotDBLock =
+                 includeSnapshotData ? snapshotCache.lock() : null;
+             HierarchicalResourceLock snapshotLocalDataLock = includeSnapshotData ? localDataManager.lock() : null) {
           // get the list of sst files of the checkpoint.
           checkpoint = createAndPrepareCheckpoint(true);
           // unlimited files as we want the Active DB contents to be transferred in a single batch
