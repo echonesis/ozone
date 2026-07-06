@@ -31,13 +31,11 @@ import org.apache.hadoop.ozone.om.OmMetadataManagerImpl;
 import org.apache.hadoop.ozone.om.OmSnapshotManager;
 import org.apache.hadoop.ozone.om.helpers.SnapshotInfo;
 import org.apache.hadoop.ozone.om.lock.HierarchicalResourceLockManager.HierarchicalResourceLock;
-import org.apache.hadoop.ozone.om.lock.OMLockDetails;
 import org.apache.hadoop.ozone.om.response.CleanupTableInfo;
 import org.apache.hadoop.ozone.om.response.OMClientResponse;
 import org.apache.hadoop.ozone.om.snapshot.OmSnapshotLocalDataManager;
 import org.apache.hadoop.ozone.om.snapshot.OmSnapshotLocalDataManager.WritableOmSnapshotLocalDataProvider;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.OMResponse;
-import org.apache.ratis.util.function.UncheckedAutoCloseableSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,8 +95,7 @@ public class OMSnapshotPurgeResponse extends OMClientResponse {
       OmSnapshotManager omSnapshotManager = metadataManager.getOzoneManager().getOmSnapshotManager();
       OmSnapshotLocalDataManager snapshotLocalDataManager = ((OmMetadataManagerImpl) omMetadataManager)
           .getOzoneManager().getOmSnapshotManager().getSnapshotLocalDataManager();
-      try (UncheckedAutoCloseableSupplier<OMLockDetails> snapshotDBLock = omSnapshotManager.getSnapshotCache().lock();
-          HierarchicalResourceLock snapshotLocalDataLock = snapshotLocalDataManager.lock()) {
+      try (HierarchicalResourceLock snapshotLocalDataLock = snapshotLocalDataManager.lock()) {
         // Remove and close snapshot's RocksDB instance from SnapshotCache.
         omSnapshotManager.invalidateCacheEntry(snapshotInfo.getSnapshotId());
         // Remove the snapshot from snapshotId to snapshotTableKey map.

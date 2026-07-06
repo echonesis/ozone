@@ -212,7 +212,10 @@ class TestKeyDeletingService extends OzoneTestBase {
 
     @AfterEach
     void resume() {
+      directoryDeletingService.resume();
       keyDeletingService.resume();
+      sstFilteringService.resume();
+      om.getKeyManager().getSnapshotDeletingService().resume();
     }
 
     @AfterAll

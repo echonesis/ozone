@@ -39,7 +39,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
@@ -49,6 +48,7 @@ import org.apache.hadoop.metrics2.MetricsRecord;
 import org.apache.hadoop.metrics2.impl.MetricsCollectorImpl;
 import org.apache.hadoop.ozone.om.lock.IOzoneManagerLock.Resource;
 import org.apache.hadoop.ozone.om.lock.OzoneManagerLock.LeveledResource;
+import org.apache.ozone.test.GenericTestUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -318,10 +318,8 @@ class TestOzoneManagerLock {
         lock.acquireWriteLock(resource, resourceName);
       }
 
-      CountDownLatch lockAttempted = new CountDownLatch(1);
       AtomicBoolean gotLock = new AtomicBoolean(false);
       Thread thread = new Thread(() -> {
-        lockAttempted.countDown();
         if (fullResourceLock) {
           lock.acquireResourceWriteLock(resource);
         } else {
@@ -336,7 +334,7 @@ class TestOzoneManagerLock {
 
       });
       thread.start();
-      assertTrue(lockAttempted.await(10, TimeUnit.SECONDS));
+      waitForBlockedThread(thread);
       // Since the new thread is trying to get lock on same resource,
       // it will wait.
       assertFalse(gotLock.get());
@@ -376,10 +374,8 @@ class TestOzoneManagerLock {
         }
       }
 
-      CountDownLatch lockAttempted = new CountDownLatch(1);
       AtomicBoolean gotLock = new AtomicBoolean(false);
       Thread thread = new Thread(() -> {
-        lockAttempted.countDown();
         if (!mainThreadAcquireResourceLock) {
           lock.acquireResourceWriteLock(resource);
         } else {
@@ -401,7 +397,7 @@ class TestOzoneManagerLock {
         }
       });
       thread.start();
-      assertTrue(lockAttempted.await(10, TimeUnit.SECONDS));
+      waitForBlockedThread(thread);
       // Since the new thread is trying to get lock on same resource,
       // it will wait.
       assertFalse(gotLock.get());
@@ -430,16 +426,14 @@ class TestOzoneManagerLock {
           generateResourceName(resource), generateResourceName(resource));
       lock.acquireWriteLocks(resource, resourceName.subList(1, resourceName.size()));
 
-      CountDownLatch lockAttempted = new CountDownLatch(1);
       AtomicBoolean gotLock = new AtomicBoolean(false);
       Thread thread = new Thread(() -> {
-        lockAttempted.countDown();
         lock.acquireWriteLocks(resource, resourceName.subList(0, 2));
         gotLock.set(true);
         lock.releaseWriteLocks(resource, resourceName.subList(0, 2));
       });
       thread.start();
-      assertTrue(lockAttempted.await(10, TimeUnit.SECONDS));
+      waitForBlockedThread(thread);
       // Since the new thread is trying to get lock on same resource,
       // it will wait.
       assertFalse(gotLock.get());
@@ -457,16 +451,14 @@ class TestOzoneManagerLock {
     OzoneManagerLock lock = new OzoneManagerLock(new OzoneConfiguration());
     lock.acquireMultiUserLock("user2", "user1");
 
-    CountDownLatch lockAttempted = new CountDownLatch(1);
     AtomicBoolean gotLock = new AtomicBoolean(false);
     Thread thread = new Thread(() -> {
-      lockAttempted.countDown();
       lock.acquireMultiUserLock("user1", "user2");
       gotLock.set(true);
       lock.releaseMultiUserLock("user1", "user2");
     });
     thread.start();
-    assertTrue(lockAttempted.await(10, TimeUnit.SECONDS));
+    waitForBlockedThread(thread);
     // Since the new thread is trying to get lock on same resource, it will
     // wait.
     assertFalse(gotLock.get());
@@ -475,6 +467,12 @@ class TestOzoneManagerLock {
     // now.
     waitForThread(thread);
     assertTrue(gotLock.get());
+  }
+
+  private static void waitForBlockedThread(Thread thread) throws Exception {
+    GenericTestUtils.waitFor(() -> thread.getState() == Thread.State.BLOCKED ||
+        thread.getState() == Thread.State.WAITING ||
+        thread.getState() == Thread.State.TIMED_WAITING, 10, 10000);
   }
 
   private static void waitForThread(Thread thread) throws InterruptedException {
