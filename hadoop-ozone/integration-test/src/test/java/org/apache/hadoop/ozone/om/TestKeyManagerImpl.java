@@ -340,10 +340,19 @@ public class TestKeyManagerImpl {
         .setReplicationConfig(RatisReplicationConfig.getInstance(THREE))
         .setAcls(OzoneAclUtil.getAclList(ugi, ALL, ALL))
         .build();
-    OMException omException = assertThrows(OMException.class,
-        () -> writeClient.openKey(keyArgs));
-    assertThat(omException.getMessage())
-        .contains("SafeModePrecheck failed for allocateBlock");
+    int retryCount = (int) HddsWhiteboxTestUtils.getInternalState(
+        writeClient, "blockAllocationRetryCount");
+    HddsWhiteboxTestUtils.setInternalState(writeClient,
+        "blockAllocationRetryCount", 0);
+    try {
+      OMException omException = assertThrows(OMException.class,
+          () -> writeClient.openKey(keyArgs));
+      assertThat(omException.getMessage())
+          .contains("SafeModePrecheck failed for allocateBlock");
+    } finally {
+      HddsWhiteboxTestUtils.setInternalState(writeClient,
+          "blockAllocationRetryCount", retryCount);
+    }
   }
 
   @Test

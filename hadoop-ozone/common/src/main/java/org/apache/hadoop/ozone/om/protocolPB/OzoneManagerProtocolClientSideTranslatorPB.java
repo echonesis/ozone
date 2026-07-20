@@ -273,6 +273,7 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
 
   public static final int BLOCK_ALLOCATION_RETRY_COUNT = 90;
   public static final int BLOCK_ALLOCATION_RETRY_WAIT_TIME_MS = 1000;
+  private int blockAllocationRetryCount = BLOCK_ALLOCATION_RETRY_COUNT;
 
   public OzoneManagerProtocolClientSideTranslatorPB(OmTransport omTransport,
       String clientId) {
@@ -2430,7 +2431,7 @@ public final class OzoneManagerProtocolClientSideTranslatorPB
 
   @Nonnull
   private OMResponse handleSubmitRequestAndSCMSafeModeRetry(OMRequest omRequest) throws IOException {
-    int retryCount = BLOCK_ALLOCATION_RETRY_COUNT;
+    int retryCount = blockAllocationRetryCount;
     while (true) {
       try {
         return handleError(submitRequest(omRequest));
