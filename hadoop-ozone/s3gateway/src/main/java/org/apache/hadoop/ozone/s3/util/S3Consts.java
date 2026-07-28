@@ -146,6 +146,7 @@ public final class S3Consts {
     public static final String KEY_MARKER = "key-marker";
     // GetBucketLocation is not implemented
     public static final String LOCATION = "location";
+    public static final String LIST_TYPE = "list-type";
     public static final String MARKER = "marker";
     public static final String MAX_DIRECTORY_BUCKETS = "max-directory-buckets";
     public static final String MAX_BUCKETS = "max-buckets";

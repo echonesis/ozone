@@ -434,6 +434,7 @@ public class TestBucketList {
     endpoint.queryParamsForTest().set(QueryParams.DELIMITER, delimiter);
     endpoint.queryParamsForTest().set(QueryParams.PREFIX, prefix);
     endpoint.queryParamsForTest().set(QueryParams.ENCODING_TYPE, encodingType);
+    endpoint.queryParamsForTest().set(QueryParams.LIST_TYPE, "2");
     endpoint.queryParamsForTest().set(QueryParams.START_AFTER, startAfter);
     ListObjectResponse response = (ListObjectResponse) endpoint.get("b1").getEntity();
 
@@ -587,6 +588,31 @@ public class TestBucketList {
     assertEquals("foo%2B1/", adapter.marshal(response.getCommonPrefixes().get(0).getPrefix()));
     assertEquals("foo/", adapter.marshal(response.getCommonPrefixes().get(1).getPrefix()));
     assertEquals("quux%20ab/", adapter.marshal(response.getCommonPrefixes().get(2).getPrefix()));
+  }
+
+  @Test
+  public void testListObjectsV1DoesNotUrlEncodePrefix() throws Exception {
+    OzoneClient client = createClientWithKeys("foo");
+    BucketEndpoint endpoint = newBucketEndpointBuilder().setClient(client).build();
+
+    endpoint.queryParamsForTest().set(QueryParams.PREFIX, "\n");
+    endpoint.queryParamsForTest().set(QueryParams.ENCODING_TYPE, ENCODING_TYPE);
+    ListObjectResponse response = (ListObjectResponse) endpoint.get("b1").getEntity();
+
+    assertEquals("\n", new ObjectKeyNameAdapter().marshal(response.getPrefix()));
+  }
+
+  @Test
+  public void testListObjectsV2UrlEncodesPrefix() throws Exception {
+    OzoneClient client = createClientWithKeys("foo");
+    BucketEndpoint endpoint = newBucketEndpointBuilder().setClient(client).build();
+
+    endpoint.queryParamsForTest().set(QueryParams.PREFIX, "\n");
+    endpoint.queryParamsForTest().set(QueryParams.ENCODING_TYPE, ENCODING_TYPE);
+    endpoint.queryParamsForTest().set(QueryParams.LIST_TYPE, "2");
+    ListObjectResponse response = (ListObjectResponse) endpoint.get("b1").getEntity();
+
+    assertEquals("%0A", new ObjectKeyNameAdapter().marshal(response.getPrefix()));
   }
 
   @Test

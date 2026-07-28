@@ -144,7 +144,6 @@ public class BucketEndpoint extends BucketOperationHandler {
       S3Owner.verifyBucketOwnerCondition(getHeaders(), bucketName, bucket.getOwner());
 
       ozoneKeyIterator = bucket.listKeys(prefix, prevKey, shallow);
-
     } catch (OMException ex) {
       getMetrics().updateGetBucketFailureStats(context.getStartNanos());
       if (ex.getResult() == ResultCodes.FILE_NOT_FOUND) {
@@ -173,14 +172,15 @@ public class BucketEndpoint extends BucketOperationHandler {
       response.setDelimiter(EncodingTypeObject.createNullable(delimiter, encodingType));
     }
     response.setName(bucketName);
-    response.setPrefix(EncodingTypeObject.createNullable(prefix, encodingType));
+    // ListObjects V1 clients expect the echoed Prefix without URL encoding.
+    response.setPrefix(EncodingTypeObject.createNullable(prefix,
+        "2".equals(queryParams().get(QueryParams.LIST_TYPE)) ? encodingType : null));
     response.setMarker(marker == null ? "" : marker);
     response.setMaxKeys(maxKeys);
     response.setEncodingType(encodingType);
     response.setTruncated(false);
     response.setContinueToken(continueToken);
     response.setStartAfter(EncodingTypeObject.createNullable(startAfter, encodingType));
-
     String prevDir = decodedToken != null ? decodedToken.getLastDir() : null;
     String lastKey = null;
     int count = 0;
