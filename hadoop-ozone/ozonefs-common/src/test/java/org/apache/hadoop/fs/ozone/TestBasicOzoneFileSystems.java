@@ -22,6 +22,7 @@ import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_SCM_BLOCK_SIZE_DEFAU
 import static org.apache.hadoop.ozone.OzoneConsts.OM_SNAPSHOT_INDICATOR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -43,8 +44,11 @@ import java.util.Collection;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.conf.StorageSize;
+import org.apache.hadoop.ozone.OmUtils;
+import org.apache.hadoop.ozone.om.OMConfigKeys;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -230,6 +234,29 @@ public class TestBasicOzoneFileSystems {
   }
 
   @Test
+  public void testO3fsConfiguredIpv6Endpoint() throws Exception {
+    OzoneConfiguration conf = new OzoneConfiguration();
+    conf.set(OMConfigKeys.OZONE_OM_ADDRESS_KEY,
+        "[2001:db8::10]:9862");
+    BasicOzoneFileSystem o3fs = spy(new BasicOzoneFileSystem());
+    BasicOzoneClientAdapterImpl adapter =
+        mock(BasicOzoneClientAdapterImpl.class);
+    doReturn(adapter).when(o3fs).createAdapter(any(), anyString(), anyString(),
+        nullable(String.class), anyInt());
+
+    o3fs.initialize(new URI("o3fs://bucket.volume/"), conf);
+
+    ArgumentCaptor<ConfigurationSource> confCaptor =
+        ArgumentCaptor.forClass(ConfigurationSource.class);
+    ArgumentCaptor<String> hostCaptor = ArgumentCaptor.forClass(String.class);
+    verify(o3fs).createAdapter(confCaptor.capture(), anyString(), anyString(),
+        hostCaptor.capture(), anyInt());
+    assertNull(hostCaptor.getValue());
+    assertEquals("[2001:db8::10]:9862",
+        OmUtils.getOmRpcAddress(confCaptor.getValue()));
+  }
+
+  @Test
   public void testO3fsDottedIpv6UriCannotBeConstructed() {
     assertThrows(URISyntaxException.class,
         () -> new URI("o3fs://bucket.volume.[2001:db8::10]:9862/"));
@@ -239,6 +266,7 @@ public class TestBasicOzoneFileSystems {
   @CsvSource({
       "o3fs://[2001:db8::10]/",
       "o3fs://[2001:db8::10]:9862/",
+      "o3fs://bucket.volume.2001:db8::10/",
       "o3fs://bucket.volume.2001:db8::10:9862/"
   })
   public void testO3fsInitializationRejectsIpv6LiteralForms(String uri) throws Exception {
