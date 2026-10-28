@@ -42,6 +42,7 @@ import static org.apache.hadoop.ozone.om.OMConfigKeys.OZONE_OM_SNAPSHOT_FORCE_FU
 import static org.apache.hadoop.ozone.om.OmSnapshotManager.DELIMITER;
 import static org.apache.hadoop.ozone.om.codec.OMDBDefinition.DIRECTORY_TABLE;
 import static org.apache.hadoop.ozone.om.codec.OMDBDefinition.FILE_TABLE;
+import static org.apache.hadoop.ozone.om.lock.DAGLeveledResource.SNAPSHOT_DB_LOCK;
 import static org.apache.hadoop.ozone.om.snapshot.SnapshotUtils.checkSnapshotActive;
 import static org.apache.hadoop.ozone.om.snapshot.SnapshotUtils.dropColumnFamilyHandle;
 import static org.apache.hadoop.ozone.om.snapshot.SnapshotUtils.getSnapshotInfo;
@@ -1031,12 +1032,22 @@ public class SnapshotDiffManager implements AutoCloseable, SnapshotDiffManagerMX
     boolean useFullDiff = snapshotForceFullDiff || forceFullDiff;
     boolean performNonNativeDiff = diffDisableNativeLibs || disableNativeDiff || !isNativeLibsLoaded;
 
+    MultiSnapshotLocks snapshotLocks =
+        new MultiSnapshotLocks(activeOmMetadataManager.getLock(), SNAPSHOT_DB_LOCK, false, 2);
     Consumer<SubStatus> activityReporter = (jobStatus) -> recordActivity(jobKey, jobStatus);
     try (DeltaFileComputer deltaFileComputer = new CompositeDeltaDiffComputer(ozoneManager.getOmSnapshotManager(),
         activeOmMetadataManager, diffJobPath, activityReporter, useFullDiff, performNonNativeDiff)) {
       if (!areDiffJobAndSnapshotsActive(volumeName, bucketName,
           fromSnapshotName, toSnapshotName)) {
         return;
+      }
+      SnapshotInfo fsInfo = getSnapshotInfo(ozoneManager,
+          volumeName, bucketName, fromSnapshotName);
+      SnapshotInfo tsInfo = getSnapshotInfo(ozoneManager,
+          volumeName, bucketName, toSnapshotName);
+      // Acquire both stripes in order before opening either snapshot to avoid inversion with checkpoint locking.
+      if (!snapshotLocks.acquireLock(Arrays.asList(fsInfo.getSnapshotId(), tsInfo.getSnapshotId())).isLockAcquired()) {
+        throw new IOException("Unable to acquire snapshot DB read locks for snapshot diff");
       }
       rcFromSnapshot =
           ozoneManager.getOmSnapshotManager()
@@ -1047,10 +1058,6 @@ public class SnapshotDiffManager implements AutoCloseable, SnapshotDiffManagerMX
 
       OmSnapshot fromSnapshot = rcFromSnapshot.get();
       OmSnapshot toSnapshot = rcToSnapshot.get();
-      SnapshotInfo fsInfo = getSnapshotInfo(ozoneManager,
-          volumeName, bucketName, fromSnapshotName);
-      SnapshotInfo tsInfo = getSnapshotInfo(ozoneManager,
-          volumeName, bucketName, toSnapshotName);
       // JobId is prepended to column families name to make them unique
       // for request.
       fromSnapshotColumnFamily =
@@ -1220,16 +1227,22 @@ public class SnapshotDiffManager implements AutoCloseable, SnapshotDiffManagerMX
       //  throw this exception.
       throw new RuntimeException(exception);
     } finally {
-      // Clean up: drop the intermediate column family and close them.
-      dropAndCloseColumnFamilyHandle(fromSnapshotColumnFamily);
-      dropAndCloseColumnFamilyHandle(toSnapshotColumnFamily);
-      dropAndCloseColumnFamilyHandle(objectIDsColumnFamily);
-      // Decrement ref counts
-      if (rcFromSnapshot != null) {
-        rcFromSnapshot.close();
-      }
-      if (rcToSnapshot != null) {
-        rcToSnapshot.close();
+      try {
+        // Clean up: drop the intermediate column family and close them.
+        dropAndCloseColumnFamilyHandle(fromSnapshotColumnFamily);
+        dropAndCloseColumnFamilyHandle(toSnapshotColumnFamily);
+        dropAndCloseColumnFamilyHandle(objectIDsColumnFamily);
+        // Decrement ref counts
+        if (rcFromSnapshot != null) {
+          rcFromSnapshot.close();
+        }
+        if (rcToSnapshot != null) {
+          rcToSnapshot.close();
+        }
+      } finally {
+        if (snapshotLocks.isLockAcquired()) {
+          snapshotLocks.releaseLock();
+        }
       }
     }
   }
