@@ -1051,10 +1051,10 @@ public class SnapshotDiffManager implements AutoCloseable, SnapshotDiffManagerMX
       }
       rcFromSnapshot =
           ozoneManager.getOmSnapshotManager()
-              .getActiveSnapshot(volumeName, bucketName, fromSnapshotName);
+              .getActiveSnapshot(volumeName, bucketName, fromSnapshotName, fsInfo.getSnapshotId());
       rcToSnapshot =
           ozoneManager.getOmSnapshotManager()
-              .getActiveSnapshot(volumeName, bucketName, toSnapshotName);
+              .getActiveSnapshot(volumeName, bucketName, toSnapshotName, tsInfo.getSnapshotId());
 
       OmSnapshot fromSnapshot = rcFromSnapshot.get();
       OmSnapshot toSnapshot = rcToSnapshot.get();
