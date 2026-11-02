@@ -390,6 +390,12 @@ public class KeyValueContainerCheck {
           blockErrors.addAll(verifyChecksum(block, chunk, chunkFile, layout, buffer, currentTree, throttler, canceler));
           buffer.clear();
           BUFFER_POOL.returnBuffer(buffer);
+        } else {
+          // No checksum to verify. Record the chunk the same way the metadata builder does, so a data scan does not
+          // drop live blocks from the tree. Reconciliation compares trees only; an omitted block looks missing and is
+          // overwritten with the peer's bytes, which cannot be verified for NONE. Content is not read. A missing chunk
+          // file stays on the branch above and is not added.
+          currentTree.addChunks(block.getBlockID().getLocalID(), true, chunk);
         }
       }
 

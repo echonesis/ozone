@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import  static org.mockito.Mockito.spy;
 
 import java.io.File;
@@ -378,6 +379,71 @@ public class TestContainerReconciliationWithMockDatanodes {
   }
 
   /**
+   * Checksum type NONE has no chunk checksums to verify, but a data scan must still list the same live blocks as the
+   * tree built from metadata. Otherwise a scanned replica treats every block on an unscanned peer as missing and
+   * overwrites its own files, and two scanned replicas cannot repair a block that one of them has lost.
+   */
+  @Test
+  public void testContainerWithoutChunkChecksumsAfterScan() throws Exception {
+    long containerID = CONTAINER_ID + 2;
+    int blocks = 2;
+    MockDatanode local = datanodes.get(0);
+    MockDatanode peer = datanodes.get(1);
+    List<MockDatanode> replicas = Arrays.asList(local, peer);
+    for (MockDatanode dn : replicas) {
+      dn.addContainerWithBlocks(containerID, blocks, false, ContainerProtos.ChecksumType.NONE);
+    }
+    long dataChecksumFromMetadata = assertUniqueChecksumCount(containerID, replicas, 1);
+    assertNotEquals(0, dataChecksumFromMetadata);
+    assertBlockBytesEqual(local, peer, containerID, blocks);
+
+    // A scan must not replace the metadata tree with an empty one.
+    local.scanContainer(containerID);
+    assertThat(local.checkAndGetDataChecksum(containerID)).isEqualTo(dataChecksumFromMetadata);
+
+    // Scanned versus not-yet-scanned replicas of a healthy NONE container must not pull blocks. Identical bytes would
+    // also match if the peer's copy were fetched and rewritten, so check that the pull path was not used.
+    byte[][] localBytesBeforeReconcile = readBlockBytes(local, containerID, blocks);
+    containerProtocolMock.clearInvocations();
+    local.reconcileContainerSuccess(dnClient, Collections.singletonList(peer.getDnDetails()), containerID);
+    containerProtocolMock.verify(() -> ContainerProtocolCalls.getBlock(any(), any(), any(), any(), any()), never());
+    containerProtocolMock.verify(() -> ContainerProtocolCalls.readChunk(any(), any(), any(), any(), any()), never());
+    local.scanContainer(containerID);
+    assertThat(readBlockBytes(local, containerID, blocks)).isEqualTo(localBytesBeforeReconcile);
+
+    // A block that is really missing is still visible after every replica is scanned, and is repaired.
+    local.introduceCorruption(containerID, 1, 0, false);
+    replicas.forEach(d -> d.scanContainer(containerID));
+    assertUniqueChecksumCount(containerID, replicas, 2);
+    local.reconcileContainerSuccess(dnClient, Collections.singletonList(peer.getDnDetails()), containerID);
+    local.scanContainer(containerID);
+    assertThat(assertUniqueChecksumCount(containerID, replicas, 1)).isEqualTo(dataChecksumFromMetadata);
+    assertBlockBytesEqual(local, peer, containerID, blocks);
+
+    // Content differences are not visible for NONE. A peer with a flipped byte must not overwrite a scanned replica
+    // whose tree already lists the block.
+    peer.corruptChunk(containerID, 0, 0);
+    byte[][] localBytesBeforeCorruptPeerReconcile = readBlockBytes(local, containerID, blocks);
+    local.reconcileContainerSuccess(dnClient, Collections.singletonList(peer.getDnDetails()), containerID);
+    local.scanContainer(containerID);
+    assertThat(readBlockBytes(local, containerID, blocks)).isEqualTo(localBytesBeforeCorruptPeerReconcile);
+    assertThat(peer.readBlockBytes(containerID, 0)).isNotEqualTo(localBytesBeforeCorruptPeerReconcile[0]);
+  }
+
+  private static byte[][] readBlockBytes(MockDatanode dn, long containerID, int blocks) throws IOException {
+    byte[][] blockBytes = new byte[blocks][];
+    for (int i = 0; i < blocks; i++) {
+      blockBytes[i] = dn.readBlockBytes(containerID, i);
+    }
+    return blockBytes;
+  }
+
+  private static void assertBlockBytesEqual(MockDatanode left, MockDatanode right, long containerID, int blocks)
+      throws IOException {
+    assertThat(readBlockBytes(left, containerID, blocks)).isEqualTo(readBlockBytes(right, containerID, blocks));
+  }
+
+  /**
    * Uses the on-demand container scanner metrics to wait for the expected number of on-demand scans to complete on
    * every datanode.
    */
@@ -653,6 +719,14 @@ public class TestContainerReconciliationWithMockDatanodes {
      *     the last chunk of the block stays in the last chunk info table.
      */
     public void addContainerWithBlocks(long containerId, int blocks, boolean incrementalChunkList) throws Exception {
+      addContainerWithBlocks(containerId, blocks, incrementalChunkList, ContainerProtos.ChecksumType.CRC32);
+    }
+
+    /**
+     * @param checksumType checksum type stored with each chunk. NONE has no chunk checksums to verify.
+     */
+    public void addContainerWithBlocks(long containerId, int blocks, boolean incrementalChunkList,
+        ContainerProtos.ChecksumType checksumType) throws Exception {
       ContainerProtos.CreateContainerRequestProto createRequest =
           ContainerProtos.CreateContainerRequestProto.newBuilder()
               .setContainerType(ContainerProtos.ContainerType.KeyValueContainer)
@@ -703,7 +777,7 @@ public class TestContainerReconciliationWithMockDatanodes {
             chunkData[c + 1] = (byte)'\n';
           }
 
-          Checksum checksum = new Checksum(ContainerProtos.ChecksumType.CRC32, bytesPerChecksum);
+          Checksum checksum = new Checksum(checksumType, bytesPerChecksum);
           ChecksumData checksumData = checksum.computeChecksum(chunkData);
           info.setChecksumData(checksumData);
           // Write chunk and checksum into the container.
@@ -801,6 +875,10 @@ public class TestContainerReconciliationWithMockDatanodes {
         file.write(~original);
       }
       log.info("Corrupting chunk {} of block {} in container {}", chunkIndex, localID, containerID);
+    }
+
+    public byte[] readBlockBytes(long containerID, long localID) throws IOException {
+      return Files.readAllBytes(ContainerTestCorruptions.getBlock(getContainer(containerID), localID).toPath());
     }
 
     public boolean hasLastChunkInfo(long containerID, long localID) throws IOException {
