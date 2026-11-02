@@ -536,6 +536,164 @@ public class TestOMOpenKeysDeleteRequest extends OMKeyRequestTests {
         omMetadataManager.getKeyTable(layout).get(liveName).getKeyLocationVersions());
   }
 
+  static Stream<Arguments> hsyncCleanupScenarios() {
+    return Stream.of(BucketLayout.OBJECT_STORE, BucketLayout.FILE_SYSTEM_OPTIMIZED)
+        .flatMap(layout -> Stream.of("same", "renamed", "reused").map(scenario -> Arguments.of(layout, scenario)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("hsyncCleanupScenarios")
+  public void testHsyncCleanupProtectsRenamedVersions(BucketLayout layout, String scenario) throws Exception {
+    bucketLayout = layout;
+    when(ozoneManager.getOzoneLockProvider()).thenReturn(new OzoneLockProvider(false, false));
+    when(ozoneManager.getObjectIdFromTxId(anyLong())).thenAnswer(invocation -> (long) invocation.getArgument(0) << 16);
+    OMRequestTestUtils.addVolumeAndBucketToDB(volumeName, omMetadataManager,
+        OmBucketInfo.newBuilder().setVolumeName(volumeName).setBucketName(bucketName)
+            .setBucketLayout(layout).setIsVersionEnabled(true));
+    when(ozoneManager.getBucketManager()).thenReturn(new BucketManagerImpl(ozoneManager, omMetadataManager));
+    Pipeline pipeline = Pipeline.newBuilder().setId(PipelineID.randomId()).setState(Pipeline.PipelineState.OPEN)
+        .setReplicationConfig(replicationConfig).setNodes(Collections.emptyList()).build();
+    AtomicLong next = new AtomicLong(5001);
+    when(scmBlockLocationProtocol.allocateBlock(anyLong(), anyInt(), any(ReplicationConfig.class),
+        anyString(), any(ExcludeList.class), anyString())).thenAnswer(invocation -> Collections.singletonList(
+            new AllocatedBlock.Builder().setPipeline(pipeline)
+                .setContainerBlockID(new ContainerBlockID(next.getAndIncrement(), 1)).build()));
+    KeyArgs args = KeyArgs.newBuilder().setVolumeName(volumeName).setBucketName(bucketName).setKeyName(keyName)
+        .setType(HddsProtos.ReplicationType.RATIS).setFactor(HddsProtos.ReplicationFactor.THREE)
+        .setDataSize(10).build();
+    OMRequest first = openForCleanup(args, 10L);
+    commitForCleanup(first, args, false, 20L);
+    OMRequest writerA = openForCleanup(args, 30L);
+    long id = writerA.getCreateKeyRequest().getClientID();
+    commitForCleanup(writerA, args, true, 40L);
+    OMRequest allocate = OMRequest.newBuilder().setClientId(UUID.randomUUID().toString())
+        .setCmdType(OzoneManagerProtocolProtos.Type.AllocateBlock)
+        .setAllocateBlockRequest(OzoneManagerProtocolProtos.AllocateBlockRequest.newBuilder()
+            .setClientID(id).setKeyArgs(args)).build();
+    applyLifecycle(lifecycleRequest(allocate).preExecute(ozoneManager), 50L);
+    OMRequest writerB = openForCleanup(args, 60L);
+    commitForCleanup(writerB, args, false, 70L);
+    String openName = layout.isFileSystemOptimized() ? omMetadataManager.getOpenFileName(
+        omMetadataManager.getVolumeId(volumeName), omMetadataManager.getBucketId(volumeName, bucketName),
+        omMetadataManager.getBucketId(volumeName, bucketName), keyName, id)
+        : omMetadataManager.getOpenKey(volumeName, bucketName, keyName, id);
+    String originalName = new OpenKeyDBKey(openName).getKeyTableDBKey();
+    String liveName = originalName;
+    OmKeyInfo open = omMetadataManager.getOpenKeyTable(layout).get(openName);
+    assertTrue(open.isHsync());
+    assertTrue(open.getMetadata().containsKey(OzoneConsts.OVERWRITTEN_HSYNC_KEY));
+    assertEquals(Arrays.asList(new BlockID(5002, 1), new BlockID(5003, 1)),
+        open.getLatestVersionLocations().getBlocksLatestVersionOnly().stream()
+            .map(OmKeyLocationInfo::getBlockID).collect(Collectors.toList()));
+    assertEquals(open.getObjectID(), omMetadataManager.getKeyTable(layout).get(liveName).getObjectID());
+    if (!scenario.equals("same")) {
+      OMRequest rename = OMRequest.newBuilder().setClientId(UUID.randomUUID().toString())
+          .setCmdType(OzoneManagerProtocolProtos.Type.RenameKey)
+          .setRenameKeyRequest(RenameKeyRequest.newBuilder().setKeyArgs(args).setToKeyName(keyName + "-renamed"))
+          .build();
+      applyLifecycle(lifecycleRequest(rename).preExecute(ozoneManager), 80L);
+      liveName += "-renamed";
+    }
+    if (scenario.equals("reused")) {
+      OMRequest replacement = openForCleanup(args, 90L);
+      commitForCleanup(replacement, args, false, 100L);
+      assertNotEquals(open.getObjectID(), omMetadataManager.getKeyTable(layout).get(originalName).getObjectID());
+    }
+    OmKeyInfo before = omMetadataManager.getKeyTable(layout).get(liveName).copyObject();
+    assertTrue(blockIDs(before).contains(new BlockID(5002, 1)));
+    OMClientResponse response = new OMOpenKeysDeleteRequest(doPreExecute(createDeleteOpenKeyRequest(
+        Collections.singletonList(Pair.of(id, open)))), layout).validateAndUpdateCache(ozoneManager, 110L);
+    assertEquals(Status.OK, response.getOMResponse().getStatus());
+    try (BatchOperation batch = omMetadataManager.getStore().initBatchOperation()) {
+      response.checkAndUpdateDB(omMetadataManager, batch);
+      omMetadataManager.getStore().commitBatchOperation(batch);
+    }
+    assertFalse(omMetadataManager.getOpenKeyTable(layout).isExist(openName));
+    RepeatedOmKeyInfo deleted = omMetadataManager.getDeletedTable().get(
+        omMetadataManager.getOzoneDeletePathKey(open.getObjectID(), openName));
+    List<BlockID> expected = scenario.equals("same") ? Collections.singletonList(new BlockID(5003, 1))
+        : Collections.emptyList();
+    assertEquals(expected, deleted == null ? Collections.emptyList() : blockIDs(deleted.getOmKeyInfoList().get(0)));
+    if (deleted != null) {
+      assertEquals(scmBlockSize, deleted.getOmKeyInfoList().get(0).getDataSize());
+    }
+    try (ReclaimableKeyFilter filter = new ReclaimableKeyFilter(ozoneManager, ozoneManager.getOmSnapshotManager(),
+        ((OmMetadataManagerImpl) omMetadataManager).getSnapshotChainManager(), null, keyManager,
+        omMetadataManager.getLock())) {
+      assertEquals(expected, keyManager.getPendingDeletionKeys(filter, Integer.MAX_VALUE).getPurgedKeys().values()
+          .stream().flatMap(key -> key.getBlockGroup().getDeletedBlocks().stream()).map(block -> block.getBlockID())
+          .collect(Collectors.toList()));
+    }
+    assertEquals(before, omMetadataManager.getKeyTable(layout).get(liveName));
+  }
+
+  @ParameterizedTest
+  @MethodSource("hsyncCleanupScenarios")
+  public void testMalformedOpenKeyDoesNotInterruptBucketCleanup(BucketLayout layout, String scenario) throws Exception {
+    bucketLayout = layout;
+    OMRequestTestUtils.addVolumeAndBucketToDB(volumeName, bucketName, omMetadataManager, layout);
+    List<Pair<Long, OmKeyInfo>> valid = new ArrayList<>();
+    valid.addAll(makeOpenKeys(volumeName, bucketName, 1));
+    valid.addAll(makeOpenKeys(volumeName, bucketName, 1));
+    for (Pair<Long, OmKeyInfo> key : valid) {
+      key.getRight().addNewVersion(Collections.emptyList(), false, false);
+    }
+    addToOpenKeyTableDB(scmBlockSize, valid);
+    OmKeyInfo malformed = valid.get(0).getRight().copyObject();
+    boolean hsync = !scenario.equals("same");
+    if (hsync) {
+      malformed = malformed.withMetadataMutations(metadata -> metadata.put(OzoneConsts.HSYNC_CLIENT_ID, "123"));
+    }
+    String malformedName = "malformed";
+    omMetadataManager.getOpenKeyTable(layout).put(malformedName, malformed);
+    OMRequest request = createDeleteOpenKeyRequest(valid);
+    OpenKeyBucket bucket = request.getDeleteOpenKeysRequest().getOpenKeysPerBucket(0);
+    request = request.toBuilder().setDeleteOpenKeysRequest(request.getDeleteOpenKeysRequest().toBuilder()
+        .clearOpenKeysPerBucket().addOpenKeysPerBucket(bucket.toBuilder().setVolumeName(volumeName)
+            .setBucketName(bucketName).clearKeys().addKeys(bucket.getKeys(0))
+            .addKeys(OpenKey.newBuilder().setName(malformedName))
+            .addKeys(request.getDeleteOpenKeysRequest().getOpenKeysPerBucket(1).getKeys(0)))).build();
+    OMClientResponse response = new OMOpenKeysDeleteRequest(doPreExecute(request), layout)
+        .validateAndUpdateCache(ozoneManager, 100L);
+    assertEquals(Status.OK, response.getOMResponse().getStatus());
+    assertNotInOpenKeyTable(valid);
+    assertFalse(omMetadataManager.getOpenKeyTable(layout).isExist(malformedName));
+    try (BatchOperation batch = omMetadataManager.getStore().initBatchOperation()) {
+      response.checkAndUpdateDB(omMetadataManager, batch);
+      omMetadataManager.getStore().commitBatchOperation(batch);
+    }
+    for (String name : getDBKeyNames(valid)) {
+      assertEquals(null, omMetadataManager.getOpenKeyTable(layout).getSkipCache(name));
+    }
+    assertEquals(null, omMetadataManager.getOpenKeyTable(layout).getSkipCache(malformedName));
+    RepeatedOmKeyInfo deleted = omMetadataManager.getDeletedTable().get(
+        omMetadataManager.getOzoneDeletePathKey(malformed.getObjectID(), malformedName));
+    if (hsync) {
+      assertEquals(null, deleted);
+    } else {
+      assertEquals(blockIDs(malformed), blockIDs(deleted.getOmKeyInfoList().get(0)));
+      assertEquals(scmBlockSize, deleted.getOmKeyInfoList().get(0).getDataSize());
+    }
+  }
+
+  private OMRequest openForCleanup(KeyArgs args, long index) throws Exception {
+    OMRequest request = OMRequest.newBuilder().setClientId(UUID.randomUUID().toString())
+        .setCmdType(OzoneManagerProtocolProtos.Type.CreateKey)
+        .setCreateKeyRequest(CreateKeyRequest.newBuilder().setKeyArgs(args)).build();
+    OMRequest prepared = lifecycleRequest(request).preExecute(ozoneManager);
+    applyLifecycle(prepared, index);
+    return prepared;
+  }
+
+  private void commitForCleanup(OMRequest create, KeyArgs args, boolean hsync, long index) throws Exception {
+    OMRequest commit = OMRequest.newBuilder().setClientId(UUID.randomUUID().toString())
+        .setCmdType(OzoneManagerProtocolProtos.Type.CommitKey)
+        .setCommitKeyRequest(CommitKeyRequest.newBuilder().setClientID(create.getCreateKeyRequest().getClientID())
+            .setHsync(hsync).setKeyArgs(args.toBuilder().addAllKeyLocations(
+                create.getCreateKeyRequest().getKeyArgs().getKeyLocationsList()))).build();
+    applyLifecycle(lifecycleRequest(commit).preExecute(ozoneManager), index);
+  }
+
   private List<BlockID> blockIDs(OmKeyInfo info) {
     return info.getKeyLocationVersions().stream().flatMap(group -> group.getLocationLists().stream())
         .flatMap(List::stream).map(OmKeyLocationInfo::getBlockID).collect(Collectors.toList());
@@ -551,6 +709,10 @@ public class TestOMOpenKeysDeleteRequest extends OMKeyRequestTests {
     case CommitKey:
       result = getBucketLayout().isFileSystemOptimized() ? new OMKeyCommitRequestWithFSO(request, getBucketLayout())
           : new OMKeyCommitRequest(request, getBucketLayout());
+      break;
+    case AllocateBlock:
+      result = getBucketLayout().isFileSystemOptimized() ? new OMAllocateBlockRequestWithFSO(request, getBucketLayout())
+          : new OMAllocateBlockRequest(request, getBucketLayout());
       break;
     case RenameKey:
       result = getBucketLayout().isFileSystemOptimized() ? new OMKeyRenameRequestWithFSO(request, getBucketLayout())
@@ -650,6 +812,7 @@ public class TestOMOpenKeysDeleteRequest extends OMKeyRequestTests {
           .flatMap(group -> group.getLocationLists().stream()).flatMap(List::stream)
           .map(OmKeyLocationInfo::getBlockID).collect(Collectors.toList());
       assertEquals(Collections.singletonList(newBlock.getBlockID()), blocks);
+      assertEquals(newBlock.getLength(), deleted.getOmKeyInfoList().get(0).getDataSize());
     }
     if (!scenario.equals("absent")) {
       assertEquals(expectedCommitted, omMetadataManager.getKeyTable(layout).get(liveName));

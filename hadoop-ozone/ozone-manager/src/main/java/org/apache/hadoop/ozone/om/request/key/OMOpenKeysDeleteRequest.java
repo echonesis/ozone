@@ -203,16 +203,7 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
           omKeyInfo = omKeyInfo.toBuilder()
               .setUpdateID(trxnLogIndex)
               .build();
-          // Historical blocks belong to committed versions, possibly renamed since this open.
-          OmKeyLocationInfoGroup latest = omKeyInfo.getLatestVersionLocations();
-          omKeyInfo.setKeyLocationVersions(latest == null ? new ArrayList<>() :
-              new ArrayList<>(Collections.singletonList(new OmKeyLocationInfoGroup(latest.getVersion(),
-                  latest.getBlocksLatestVersionOnly(), latest.isMultipartKey()))));
-          OmKeyInfo liveKey = omMetadataManager.getKeyTable(getBucketLayout())
-              .get(new OpenKeyDBKey(fullKeyName).getKeyTableDBKey());
-          if (liveKey != null) {
-            filterOutBlocksStillInUse(liveKey, new RepeatedOmKeyInfo(omKeyInfo, bucketId));
-          }
+          omKeyInfo = blocksReclaimableFromOpenKey(omMetadataManager, fullKeyName, omKeyInfo, bucketId);
           deletedOpenKeys.put(fullKeyName, Pair.of(bucketId, omKeyInfo));
 
           // Update openKeyTable cache.
@@ -237,6 +228,36 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
             .releaseWriteLock(BUCKET_LOCK, volumeName, bucketName));
       }
     }
+  }
+
+  /**
+   * Removes inherited versions, which may belong to a renamed committed key, from this request's private candidate.
+   * Hsync also shares latest-version blocks: without a matching live object, retain all blocks conservatively.
+   * The filter mutates the candidate in place. Pass this same object to RepeatedOmKeyInfo, not copyObject(),
+   * so that the returned candidate contains the filtered blocks.
+   */
+  private OmKeyInfo blocksReclaimableFromOpenKey(OMMetadataManager omMetadataManager, String fullKeyName,
+      OmKeyInfo omKeyInfo, long bucketId) throws IOException {
+    OmKeyLocationInfoGroup latest = omKeyInfo.getLatestVersionLocations();
+    omKeyInfo.setKeyLocationVersions(latest == null ? new ArrayList<>() :
+        new ArrayList<>(Collections.singletonList(new OmKeyLocationInfoGroup(latest.getVersion(),
+            latest.getBlocksLatestVersionOnly(), latest.isMultipartKey()))));
+    String liveKeyName = null;
+    try {
+      liveKeyName = new OpenKeyDBKey(fullKeyName).getKeyTableDBKey();
+    } catch (IllegalArgumentException ex) {
+      LOG.warn("Cannot resolve live key for open key {}", fullKeyName, ex);
+    }
+    OmKeyInfo liveKey = liveKeyName == null ? null : omMetadataManager.getKeyTable(getBucketLayout()).get(liveKeyName);
+    if (omKeyInfo.isHsync() && (liveKey == null || liveKey.getObjectID() != omKeyInfo.getObjectID())) {
+      omKeyInfo.setKeyLocationVersions(new ArrayList<>());
+    } else if (liveKey != null) {
+      filterOutBlocksStillInUse(liveKey, new RepeatedOmKeyInfo(omKeyInfo, bucketId));
+    }
+    omKeyInfo.setDataSize(omKeyInfo.getKeyLocationVersions().stream()
+        .flatMap(group -> group.getLocationLists().stream()).flatMap(List::stream)
+        .mapToLong(block -> block.getLength()).sum());
+    return omKeyInfo;
   }
 
 }
