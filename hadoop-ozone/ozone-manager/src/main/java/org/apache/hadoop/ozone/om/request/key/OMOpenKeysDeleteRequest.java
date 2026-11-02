@@ -22,6 +22,7 @@ import static org.apache.hadoop.ozone.om.lock.OzoneManagerLock.LeveledResource.B
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,11 +35,14 @@ import org.apache.hadoop.ozone.audit.AuditLoggerType;
 import org.apache.hadoop.ozone.audit.OMSystemAction;
 import org.apache.hadoop.ozone.om.OMMetadataManager;
 import org.apache.hadoop.ozone.om.OMMetrics;
+import org.apache.hadoop.ozone.om.OpenKeyDBKey;
 import org.apache.hadoop.ozone.om.OzoneManager;
 import org.apache.hadoop.ozone.om.execution.flowcontrol.ExecutionContext;
 import org.apache.hadoop.ozone.om.helpers.BucketLayout;
 import org.apache.hadoop.ozone.om.helpers.OmBucketInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
+import org.apache.hadoop.ozone.om.helpers.RepeatedOmKeyInfo;
 import org.apache.hadoop.ozone.om.request.util.OmResponseUtil;
 import org.apache.hadoop.ozone.om.response.OMClientResponse;
 import org.apache.hadoop.ozone.om.response.key.OMOpenKeysDeleteResponse;
@@ -199,6 +203,16 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
           omKeyInfo = omKeyInfo.toBuilder()
               .setUpdateID(trxnLogIndex)
               .build();
+          // Historical blocks belong to committed versions, possibly renamed since this open.
+          OmKeyLocationInfoGroup latest = omKeyInfo.getLatestVersionLocations();
+          omKeyInfo.setKeyLocationVersions(latest == null ? new ArrayList<>() :
+              new ArrayList<>(Collections.singletonList(new OmKeyLocationInfoGroup(latest.getVersion(),
+                  latest.getBlocksLatestVersionOnly(), latest.isMultipartKey()))));
+          OmKeyInfo liveKey = omMetadataManager.getKeyTable(getBucketLayout())
+              .get(new OpenKeyDBKey(fullKeyName).getKeyTableDBKey());
+          if (liveKey != null) {
+            filterOutBlocksStillInUse(liveKey, new RepeatedOmKeyInfo(omKeyInfo, bucketId));
+          }
           deletedOpenKeys.put(fullKeyName, Pair.of(bucketId, omKeyInfo));
 
           // Update openKeyTable cache.
