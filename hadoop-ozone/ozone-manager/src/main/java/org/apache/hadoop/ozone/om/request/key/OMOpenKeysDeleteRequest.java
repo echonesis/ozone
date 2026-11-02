@@ -20,19 +20,25 @@ package org.apache.hadoop.ozone.om.request.key;
 import static org.apache.hadoop.ozone.om.lock.OzoneManagerLock.LeveledResource.BUCKET_LOCK;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.InvalidPathException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hadoop.hdds.client.ContainerBlockID;
 import org.apache.hadoop.hdds.utils.db.cache.CacheKey;
 import org.apache.hadoop.hdds.utils.db.cache.CacheValue;
 import org.apache.hadoop.ozone.audit.AuditLogger;
 import org.apache.hadoop.ozone.audit.AuditLoggerType;
 import org.apache.hadoop.ozone.audit.OMSystemAction;
+import org.apache.hadoop.ozone.om.ListIterator;
 import org.apache.hadoop.ozone.om.OMMetadataManager;
 import org.apache.hadoop.ozone.om.OMMetrics;
 import org.apache.hadoop.ozone.om.OpenKeyDBKey;
@@ -183,6 +189,7 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
       acquiredLock = getOmLockDetails().isLockAcquired();
       OmBucketInfo omBucketInfo = getBucketInfo(omMetadataManager, volumeName, bucketName);
       long bucketId = omBucketInfo == null ? 0L : omBucketInfo.getObjectID();
+      Map<String, OmKeyInfo> candidates = new LinkedHashMap<>();
       for (OpenKey key: keysPerBucket.getKeysList()) {
         String fullKeyName = key.getName();
 
@@ -204,23 +211,23 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
               .setUpdateID(trxnLogIndex)
               .build();
           omKeyInfo = blocksReclaimableFromOpenKey(omMetadataManager, fullKeyName, omKeyInfo, bucketId);
-          deletedOpenKeys.put(fullKeyName, Pair.of(bucketId, omKeyInfo));
-
-          // Update openKeyTable cache.
-          omMetadataManager.getOpenKeyTable(getBucketLayout()).addCacheEntry(
-              new CacheKey<>(fullKeyName),
-              CacheValue.get(trxnLogIndex));
-
-          ozoneManager.getMetrics().incNumOpenKeysDeleted();
-          LOG.debug("Open key {} deleted.", fullKeyName);
-
-          // No need to add cache entries to delete table. As delete table will
-          // be used by DeleteKeyService only, not used for any client response
-          // validation, so we don't need to add to cache.
+          candidates.put(fullKeyName, omKeyInfo);
         } else {
           LOG.debug("Key {} was not deleted, as it was not " +
                   "found in the open key table.", fullKeyName);
         }
+      }
+      filterHsyncBlocksInUse(omMetadataManager, candidates.values(), bucketId);
+      for (Map.Entry<String, OmKeyInfo> candidate : candidates.entrySet()) {
+        OmKeyInfo info = candidate.getValue();
+        info.setDataSize(info.getKeyLocationVersions().stream()
+            .flatMap(group -> group.getLocationLists().stream()).flatMap(List::stream)
+            .mapToLong(block -> block.getLength()).sum());
+        deletedOpenKeys.put(candidate.getKey(), Pair.of(bucketId, info));
+        omMetadataManager.getOpenKeyTable(getBucketLayout()).addCacheEntry(
+            new CacheKey<>(candidate.getKey()), CacheValue.get(trxnLogIndex));
+        ozoneManager.getMetrics().incNumOpenKeysDeleted();
+        LOG.debug("Open key {} deleted.", candidate.getKey());
       }
     } finally {
       if (acquiredLock) {
@@ -232,7 +239,7 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
 
   /**
    * Removes inherited versions, which may belong to a renamed committed key, from this request's private candidate.
-   * Hsync also shares latest-version blocks: without a matching live object, retain all blocks conservatively.
+   * Hsync candidates require a separate bucket-wide reference check, including renamed committed versions.
    * The filter mutates the candidate in place. Pass this same object to RepeatedOmKeyInfo, not copyObject(),
    * so that the returned candidate contains the filtered blocks.
    */
@@ -242,6 +249,9 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
     omKeyInfo.setKeyLocationVersions(latest == null ? new ArrayList<>() :
         new ArrayList<>(Collections.singletonList(new OmKeyLocationInfoGroup(latest.getVersion(),
             latest.getBlocksLatestVersionOnly(), latest.isMultipartKey()))));
+    if (omKeyInfo.isHsync()) {
+      return omKeyInfo;
+    }
     String liveKeyName = null;
     try {
       liveKeyName = new OpenKeyDBKey(fullKeyName).getKeyTableDBKey();
@@ -249,15 +259,44 @@ public class OMOpenKeysDeleteRequest extends OMKeyRequest {
       LOG.warn("Cannot resolve live key for open key {}", fullKeyName, ex);
     }
     OmKeyInfo liveKey = liveKeyName == null ? null : omMetadataManager.getKeyTable(getBucketLayout()).get(liveKeyName);
-    if (omKeyInfo.isHsync() && (liveKey == null || liveKey.getObjectID() != omKeyInfo.getObjectID())) {
-      omKeyInfo.setKeyLocationVersions(new ArrayList<>());
-    } else if (liveKey != null) {
+    if (liveKey != null) {
       filterOutBlocksStillInUse(liveKey, new RepeatedOmKeyInfo(omKeyInfo, bucketId));
     }
-    omKeyInfo.setDataSize(omKeyInfo.getKeyLocationVersions().stream()
-        .flatMap(group -> group.getLocationLists().stream()).flatMap(List::stream)
-        .mapToLong(block -> block.getLength()).sum());
     return omKeyInfo;
+  }
+
+  /** Checks every committed name once, since stale writers can restore an object ID under the original name. */
+  private void filterHsyncBlocksInUse(OMMetadataManager metadataManager, Collection<OmKeyInfo> candidates,
+      long bucketId) throws IOException {
+    Map<ContainerBlockID, List<OmKeyInfo>> pending = new HashMap<>();
+    OmKeyInfo first = null;
+    for (OmKeyInfo candidate : candidates) {
+      if (candidate.isHsync()) {
+        first = candidate;
+        candidate.getKeyLocationVersions().stream().flatMap(group -> group.getLocationLists().stream())
+            .flatMap(List::stream).forEach(block -> pending
+                .computeIfAbsent(block.getBlockID().getContainerBlockID(), ignored -> new ArrayList<>())
+                .add(candidate));
+      }
+    }
+    if (pending.isEmpty()) {
+      return;
+    }
+    try (ListIterator.ClosableIterator iterator = ListIterator.keyIterator(metadataManager, getBucketLayout(),
+        first.getVolumeName(), first.getBucketName())) {
+      while (!pending.isEmpty() && iterator.hasNext()) {
+        OmKeyInfo live = (OmKeyInfo) iterator.next().getValue();
+        List<OmKeyInfo> referenced = live.getKeyLocationVersions().stream()
+            .flatMap(group -> group.getLocationLists().stream()).flatMap(List::stream)
+            .map(block -> pending.remove(block.getBlockID().getContainerBlockID())).filter(Objects::nonNull)
+            .flatMap(List::stream).distinct().collect(Collectors.toList());
+        if (!referenced.isEmpty()) {
+          filterOutBlocksStillInUse(live, new RepeatedOmKeyInfo(referenced, bucketId));
+        }
+      }
+    } catch (UncheckedIOException ex) {
+      throw ex.getCause();
+    }
   }
 
 }

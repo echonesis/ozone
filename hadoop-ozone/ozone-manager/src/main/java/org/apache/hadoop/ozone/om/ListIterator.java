@@ -43,7 +43,18 @@ import org.apache.hadoop.ozone.om.helpers.BucketLayout;
  * Common class to do listing of resources after merging
  * rocksDB table cache and actual table.
  */
-public class ListIterator {
+public final class ListIterator {
+
+  private ListIterator() {
+  }
+
+  /** Returns committed keys in a bucket, merging cache entries and tombstones with the DB. */
+  public static ClosableIterator keyIterator(OMMetadataManager metadataManager, BucketLayout layout,
+      String volume, String bucket) throws IOException {
+    String prefix = layout.isFileSystemOptimized() ? metadataManager.getOzoneKeyFSO(volume, bucket, "/")
+        : metadataManager.getBucketKeyPrefix(volume, bucket);
+    return new MinHeapIterator(metadataManager, prefix, "", volume, bucket, metadataManager.getKeyTable(layout));
+  }
 
   /**
    * Interface for iteration of Heap Entries.
