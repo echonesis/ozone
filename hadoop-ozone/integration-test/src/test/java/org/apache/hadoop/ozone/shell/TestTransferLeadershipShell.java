@@ -87,6 +87,20 @@ public class TestTransferLeadershipShell {
   }
 
   @Test
+  public void testOmTransferToCurrentLeader() throws Exception {
+    OzoneManager leader = cluster.getOMLeader();
+    assertOMResetPriorities();
+    long configurationIndex = leader.getOmRatisServer().getServerDivision().getRaftConf().getLogEntryIndex();
+
+    String[] args = {"om", "transfer", "-n", leader.getOMNodeId()};
+    assertEquals(ExitCode.OK, ozoneAdmin.execute(args));
+
+    assertEquals(leader, cluster.getOMLeader());
+    assertEquals(configurationIndex, leader.getOmRatisServer().getServerDivision().getRaftConf().getLogEntryIndex());
+    assertOMResetPriorities();
+  }
+
+  @Test
   public void testOmTransfer() throws Exception {
     OzoneManager oldLeader = cluster.getOMLeader();
     List<OzoneManager> omList = new ArrayList<>(cluster.getOzoneManagersList());
@@ -98,6 +112,12 @@ public class TestTransferLeadershipShell {
     ozoneAdmin.execute(args1);
     Thread.sleep(3000);
     assertEquals(newLeader, cluster.getOMLeader());
+    assertOMResetPriorities();
+
+    long configurationIndex = newLeader.getOmRatisServer().getServerDivision().getRaftConf().getLogEntryIndex();
+    assertEquals(ExitCode.OK, ozoneAdmin.execute(args1));
+    assertEquals(newLeader, cluster.getOMLeader());
+    assertEquals(configurationIndex, newLeader.getOmRatisServer().getServerDivision().getRaftConf().getLogEntryIndex());
     assertOMResetPriorities();
 
     oldLeader = cluster.getOMLeader();

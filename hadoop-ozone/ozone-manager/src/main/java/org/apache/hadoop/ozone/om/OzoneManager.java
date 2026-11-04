@@ -4057,6 +4057,10 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
         targetPeerId = RaftPeerId.valueOf(newLeaderId);
       }
 
+      if (targetPeerId.equals(omRatisServer.getLeaderId())) {
+        return;
+      }
+
       final GrpcTlsConfig tlsConfig =
           OzoneManagerRatisUtils.createServerTlsConfig(secConfig, certClient);
 
