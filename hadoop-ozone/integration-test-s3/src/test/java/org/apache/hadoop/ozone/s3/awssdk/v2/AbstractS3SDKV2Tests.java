@@ -1027,6 +1027,69 @@ public abstract class AbstractS3SDKV2Tests extends OzoneTestBase implements Clus
   }
 
   @Test
+  public void testDeleteObjectIfMatchSize() {
+    final String bucketName = getBucketName();
+    final String keyName = getKeyName();
+    final String content = "bar";
+    s3Client.createBucket(b -> b.bucket(bucketName));
+    s3Client.putObject(b -> b.bucket(bucketName).key(keyName), RequestBody.fromString(content));
+
+    s3Client.deleteObject(b -> b.bucket(bucketName).key(keyName).ifMatchSize((long) content.length()));
+
+    assertThrows(NoSuchKeyException.class, () -> s3Client.headObject(b -> b.bucket(bucketName).key(keyName)));
+  }
+
+  @Test
+  public void testDeleteObjectIfMatchSizeFail() {
+    final String bucketName = getBucketName();
+    final String keyName = getKeyName();
+    final String content = "bar";
+    s3Client.createBucket(b -> b.bucket(bucketName));
+    PutObjectResponse initialResponse = s3Client.putObject(
+        b -> b.bucket(bucketName).key(keyName), RequestBody.fromString(content));
+
+    S3Exception exception = assertThrows(S3Exception.class,
+        () -> s3Client.deleteObject(b -> b.bucket(bucketName).key(keyName).ifMatchSize(content.length() + 1L)));
+
+    assertEquals(412, exception.statusCode());
+    assertEquals("PreconditionFailed", exception.awsErrorDetails().errorCode());
+    assertEquals(initialResponse.eTag(), s3Client.headObject(b -> b.bucket(bucketName).key(keyName)).eTag());
+  }
+
+  @Test
+  public void testDeleteObjectIfMatchAndIfMatchSize() {
+    final String bucketName = getBucketName();
+    final String keyName = getKeyName();
+    final String content = "bar";
+    s3Client.createBucket(b -> b.bucket(bucketName));
+    PutObjectResponse initialResponse = s3Client.putObject(
+        b -> b.bucket(bucketName).key(keyName), RequestBody.fromString(content));
+
+    S3Exception exception = assertThrows(S3Exception.class, () -> s3Client.deleteObject(
+        b -> b.bucket(bucketName).key(keyName).ifMatch(initialResponse.eTag()).ifMatchSize(content.length() + 1L)));
+    assertEquals(412, exception.statusCode());
+    assertEquals(initialResponse.eTag(), s3Client.headObject(b -> b.bucket(bucketName).key(keyName)).eTag());
+
+    s3Client.deleteObject(
+        b -> b.bucket(bucketName).key(keyName).ifMatch(initialResponse.eTag()).ifMatchSize((long) content.length()));
+
+    assertThrows(NoSuchKeyException.class, () -> s3Client.headObject(b -> b.bucket(bucketName).key(keyName)));
+  }
+
+  @Test
+  public void testDeleteObjectIfMatchSizeMissingKeyFail() {
+    final String bucketName = getBucketName();
+    final String keyName = getKeyName();
+    s3Client.createBucket(b -> b.bucket(bucketName));
+
+    S3Exception exception = assertThrows(S3Exception.class,
+        () -> s3Client.deleteObject(b -> b.bucket(bucketName).key(keyName).ifMatchSize(0L)));
+
+    assertEquals(412, exception.statusCode());
+    assertEquals("PreconditionFailed", exception.awsErrorDetails().errorCode());
+  }
+
+  @Test
   public void testAbortMultipartUploadWithEmptyUploadIdKeepsObject() {
     final String bucketName = getBucketName();
     final String keyName = getKeyName();

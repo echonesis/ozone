@@ -17,6 +17,7 @@
 
 package org.apache.hadoop.ozone.s3.endpoint;
 
+import static org.apache.hadoop.ozone.s3.exception.S3ErrorTable.INVALID_ARGUMENT;
 import static org.apache.hadoop.ozone.s3.exception.S3ErrorTable.INVALID_REQUEST;
 import static org.apache.hadoop.ozone.s3.exception.S3ErrorTable.PRECOND_FAILED;
 import static org.apache.hadoop.ozone.s3.exception.S3ErrorTable.newError;
@@ -167,7 +168,26 @@ final class S3ConditionalRequest {
       ex.setErrorMessage("If-Match header cannot be empty.");
       throw ex;
     }
-    return new DeleteCondition(ifMatch);
+    return new DeleteCondition(ifMatch, parseIfMatchSize(headers, keyPath));
+  }
+
+  private static Long parseIfMatchSize(HttpHeaders headers, String keyPath) throws OS3Exception {
+    String ifMatchSize = headers.getHeaderString(S3Consts.IF_MATCH_SIZE_HEADER);
+    if (ifMatchSize == null) {
+      return null;
+    }
+    long size;
+    try {
+      size = Long.parseLong(ifMatchSize.trim());
+    } catch (NumberFormatException e) {
+      size = -1;
+    }
+    if (size < 0) {
+      OS3Exception ex = newError(INVALID_ARGUMENT, keyPath);
+      ex.setErrorMessage(S3Consts.IF_MATCH_SIZE_HEADER + " header must be a non-negative integer.");
+      throw ex;
+    }
+    return size;
   }
 
   private static Response buildNotModifiedResponse(OzoneKey key) {
@@ -260,17 +280,23 @@ final class S3ConditionalRequest {
 
   static final class DeleteCondition {
     private final String ifMatch;
+    private final Long expectedSize;
 
-    private DeleteCondition(String ifMatch) {
+    private DeleteCondition(String ifMatch, Long expectedSize) {
       this.ifMatch = ifMatch;
+      this.expectedSize = expectedSize;
     }
 
-    boolean hasIfMatch() {
-      return ifMatch != null;
+    boolean hasCondition() {
+      return ifMatch != null || expectedSize != null;
     }
 
     String getExpectedETag() {
       return parseETag(ifMatch);
+    }
+
+    Long getExpectedSize() {
+      return expectedSize;
     }
   }
 }
